@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>davi-1337 ~ blog</title>
+  <link rel="icon" type="image/jpeg" href="./assets/images.jpeg">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a0a;
+      color: #b0b0b0;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 15px;
+      line-height: 1.6;
+      min-height: 100vh;
+      padding: 20px;
+      max-width: 760px;
+      margin: 0 auto;
+    }
+
+    ::selection { background: #00ff41; color: #0a0a0a; }
+    a { color: #00ff41; text-decoration: none; }
+    a:hover { color: #fff; }
+
+    .header {
+      text-align: center;
+      margin-bottom: 30px;
+      border-bottom: 1px solid #1a1a1a;
+      padding-bottom: 20px;
+    }
+
+    .logo {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      border: 2px solid #00ff41;
+      margin-bottom: 15px;
+      filter: grayscale(30%);
+      transition: filter 0.3s;
+    }
+
+    .logo:hover {
+      filter: grayscale(0%);
+      box-shadow: 0 0 15px rgba(0, 255, 65, 0.3);
+    }
+
+    .ascii-title {
+      color: #00ff41;
+      font-size: 11px;
+      line-height: 1.2;
+      margin-bottom: 10px;
+      white-space: pre;
+    }
+
+    .tagline { color: #555; font-size: 13px; }
+    .g { color: #00ff41; }
+
+    nav {
+      margin: 20px 0;
+      padding: 8px 0;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+
+    nav a { margin-right: 20px; color: #666; font-size: 13px; }
+    nav a:hover, nav a.active { color: #00ff41; }
+
+    .post-list { list-style: none; margin-top: 20px; }
+
+    .post-list li {
+      padding: 12px 0;
+      border-bottom: 1px solid #111;
+      transition: padding-left 0.2s;
+    }
+
+    .post-list li:hover { padding-left: 5px; }
+
+    .post-date { color: #444; font-size: 12px; margin-right: 10px; }
+
+    .post-tag {
+      font-size: 11px;
+      padding: 1px 6px;
+      border: 1px solid #222;
+      margin-left: 8px;
+    }
+
+    .post-tag.web3 { border-color: #8b5cf6; color: #8b5cf6; }
+    .post-tag.pwn { border-color: #ef4444; color: #ef4444; }
+    .post-tag.web2 { border-color: #3b82f6; color: #3b82f6; }
+
+    .blink { animation: b 1s step-end infinite; }
+    @keyframes b { 50% { opacity: 0; } }
+
+    footer {
+      margin-top: 40px;
+      padding-top: 15px;
+      border-top: 1px solid #1a1a1a;
+      color: #333;
+      font-size: 12px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <img src="./assets/images.jpeg" alt="davi-1337" class="logo">
+    <pre class="ascii-title">
+     _            _       __ _____ _____ ______
+    | |          (_)     /_ |___ /|___ /|____  |
+  __| | __ ___   _  ___  | | |_ \  |_ \    / /
+ / _` |/ _` \ \ / /| |______| | |___) |___) |  / /
+| (_| | (_| |\ V / | |______| |____) |____) | / /
+ \__,_|\__,_| \_/  |_|      |_|_____/|_____/ /_/
+    </pre>
+    <p class="tagline"><span class="g">$</span> 16y/o<span class="g blink">_</span></p>
+  </div>
+
+  <nav>
+    <a href="index.html" class="active"><span class="g">[~]</span> home</a>
+    <a href="about.html"><span class="g">[~]</span> about</a>
+  </nav>
+
+  <ul class="post-list">
+    <li>
+      <span class="post-date">2026-02-15</span>
+      <a href="./posts/hello-world.html">hello world</a>
+    </li>
+    <!--
+      <li>
+        <span class="post-date">YYYY-MM-DD</span>
+        <a href="./posts/your-post.html">title</a>
+        <span class="post-tag pwn">pwn</span>
+      </li>
+    -->
+  </ul>
+
+  <footer>
+    <p>davi-1337 &copy; 2026</p>
+  </footer>
+
+</body>
+</html>
