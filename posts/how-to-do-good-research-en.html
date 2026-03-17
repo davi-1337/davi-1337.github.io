@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>how to do good research ~ davi-1337</title>
+  <link rel="icon" type="image/jpeg" href="../assets/images.jpeg">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a0a;
+      color: #b0b0b0;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 15px;
+      line-height: 1.7;
+      min-height: 100vh;
+      padding: 20px;
+      max-width: 760px;
+      margin: 0 auto;
+    }
+
+    ::selection { background: #00ff41; color: #0a0a0a; }
+    a { color: #00ff41; text-decoration: none; }
+    a:hover { color: #fff; }
+    .g { color: #00ff41; }
+
+    nav {
+      padding: 10px 0;
+      margin-bottom: 25px;
+      border-bottom: 1px solid #1a1a1a;
+      font-size: 13px;
+    }
+
+    nav a { margin-right: 20px; color: #666; }
+    nav a:hover { color: #00ff41; }
+
+    .post-header {
+      margin-bottom: 30px;
+      border-bottom: 1px solid #1a1a1a;
+      padding-bottom: 15px;
+    }
+
+    .post-header h1 {
+      color: #00ff41;
+      font-size: 18px;
+      font-weight: normal;
+      margin-bottom: 8px;
+    }
+
+    .post-meta { color: #444; font-size: 12px; }
+
+    .post-content h2 {
+      color: #00ff41;
+      font-size: 16px;
+      font-weight: normal;
+      margin: 25px 0 10px 0;
+    }
+
+    .post-content p { margin-bottom: 12px; }
+    .post-content ul { margin: 10px 0 10px 20px; }
+    .post-content li { margin-bottom: 5px; }
+    .post-content img { max-width: 100%; border: 1px solid #1a1a1a; margin: 15px 0; }
+
+    footer {
+      margin-top: 40px;
+      padding-top: 15px;
+      border-top: 1px solid #1a1a1a;
+      color: #333;
+      font-size: 12px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <a href="../index.html"><span class="g">[~]</span> home</a>
+    <a href="../about.html"><span class="g">[~]</span> about</a>
+  </nav>
+
+  <div class="post-header">
+    <h1>> How to Do Good Research</h1>
+    <p class="post-meta">2026-03-17 // davi-1337</p>
+  </div>
+
+  <div class="post-content">
+    <p><strong>TRADUZIDO COM AI, DESCULPA SE TIVER UM ERRO!</strong></p>
+
+    <img src="../markdown/pt-br-article/Como%20fazer%20uma%20boa%20Research/banner.png.png" alt="banner.png.png">
+
+    <h2>Summary</h2>
+    <p>Ignoring the <strong>obvious</strong> name, this blogpost is not tips that will help you “exploit” a bug or give you tips on how to find awesome bugs, it is obvious that you need technical knowledge. However, in this blogpost I will detail my experience doing research, without much preparation. And how I stayed focused and kept hope even when everything went wrong.</p>
+
+    <p>Recently I decided to focus on understanding not only technical fundamentals, but also the “mindset” (sorry for using this word hehehehe) of people who do research and are able to find vulnerabilities in widely used software. And I decided to spend a few months studying and improving this skill, from AI assistance to how to stay focused during research.</p>
+
+    <img src="../markdown/pt-br-article/Como%20fazer%20uma%20boa%20Research/researchmeme.png" alt="researchmeme.png">
+
+    <h2>What is doing Research after all?</h2>
+    <p>In this context, it is necessary to understand that doing Research is not a linear process, it is a slow and totally orthogonal process, you can go back one <strong>step</strong>, move <strong>forward</strong>, give up, <strong>come back</strong> another day. For the sake of example, look at the image below</p>
+
+    <img src="../markdown/pt-br-article/Como%20fazer%20uma%20boa%20Research/MAIS.png" alt="MAIS.png">
+
+    <p>You will not always find the bug on your first day, sometimes it takes months, sometimes even years. But of course, the important thing is not to give up and stay focused!</p>
+
+    <h2>Choosing the Target!</h2>
+    <p>So let's start.... Obviously you need a target to begin doing research, whether harder ones like a browser or even something simpler like a gameboy emulator. Just pick something you would like to research and start. <strong>But after all, how do I know if I really want to do research on this target?</strong></p>
+
+    <ul>
+      <li>Questions you should ask yourself....
+        <ul>
+          <li>Do I like this target?</li>
+          <li>Do I know this target well enough?</li>
+          <li>Do I have motivation and discipline to stay months on this target?</li>
+        </ul>
+      </li>
+    </ul>
+
+    <p>If at least 2 of these answers are <strong>“YES”,</strong> you have a good target that you can look at. But of course depending on the difficulty it will be much more work... But of course it is never <strong>“impossible”</strong></p>
+
+    <h2>Choosing an attack-surface!</h2>
+    <p>Imagine your target not as a final application, but as a set of several subcomponents, and this is (maybe) the most important part of research, because if you choose a good attack surface you <strong>move one house forward</strong>, a bad one makes you lose days or even months on a <strong>bad target (wasting time).</strong> This is a slow and lengthy process, it should not be fast. What I like to do is map all good attack surfaces, but it is important to evaluate all your options before anything else, and besides that: a good attack surface is something that meets these requirements:</p>
+
+    <ul>
+      <li>Poorly audited</li>
+      <li>Complex</li>
+      <li>Has a lot of new code or code that changed recently</li>
+      <li>Handles user input in some way (parsing, deserialization, etc)</li>
+      <li>Has a history of previous bugs (where there was 1 bug there are probably more)</li>
+    </ul>
+
+    <p>Think like this: if a component has already been audited by 500 people and had 200 CVEs in recent years, <strong>maybe</strong> the easiest bugs are already gone. But if you find a corner of the code that nobody looked at properly, that is complex and processes external data... then yes you have <strong>gold</strong>.</p>
+
+    <h2>Understanding the code</h2>
+    <p>Alright, you already chose your target and your attack surface. Now comes the part many people skip (and should not): <strong>understanding the code for real</strong>. I am not talking about reading superficially and thinking you understood it. I am talking about sitting down, opening the source code, and understanding the <strong>flow</strong> of data from input to where it is processed.</p>
+
+    <p>I know it sounds boring (and sometimes it is hehehe), but this step is what separates people who find bugs from people who only keep trying. Some things I do at this stage:</p>
+
+    <ul>
+      <li>I read the project <strong>documentation</strong> (yes, documentation matters)</li>
+      <li>I identify the main <strong>entry points</strong> (where user data enters)</li>
+      <li>I trace the data path through the code, writing down each transformation</li>
+      <li>I look for <strong>dangerous patterns</strong>: type conversions, manual memory allocations, custom parsing, bounds-checking logic</li>
+      <li>I write down <strong>everything</strong> that looks weird, even if I do not understand it at the time</li>
+    </ul>
+
+    <p>You do not need to understand 100% of the code on the first day. In reality, you probably <strong>will not</strong> understand. And that is okay. Understanding comes with time, and every time you come back to the code you see things that previously went unnoticed.</p>
+
+    <p>One thing that helped me <strong>a lot</strong> was using code navigation tools like <strong>Source Insight</strong>, <strong>Ghidra</strong>, or even good old <strong>grep</strong>. Having the ability to jump between functions and references quickly makes an absurd difference when you are trying to understand a big codebase.</p>
+
+    <h2>Taking notes (this is ESSENTIAL)</h2>
+    <p>I cannot emphasize this enough: <strong>TAKE NOTES</strong>. About everything. Literally everything. Every crazy idea you had, every weird function you saw, every hypothesis you want to test later. Write it down.</p>
+
+    <p>Why? Because research is long. You will sleep, wake up the next day and <strong>forget</strong> that brilliant idea you had at 3 AM. Or you will come back after a week and not remember why you marked that function as suspicious.</p>
+
+    <p>I personally use a mix of <strong>Notion</strong> and <strong>notes in the code itself</strong> (comments). But use whatever works for you, it can be a txt file, a physical notebook, whatever. The important thing is that it is <strong>recorded</strong>.</p>
+
+    <p>The format I like to use in my notes:</p>
+
+    <ul>
+      <li><strong>What I looked at today</strong>: brief summary of what I analyzed</li>
+      <li><strong>Suspicious things</strong>: functions, patterns, strange behaviors</li>
+      <li><strong>Hypotheses</strong>: what I think can bug and why</li>
+      <li><strong>Next steps</strong>: what I want to look at tomorrow</li>
+    </ul>
+
+    <p>This sounds silly but it makes a <strong>huge</strong> difference in research continuity. You do not lose context between days and you can maintain steady progress.</p>
+
+    <h2>Dealing with frustration</h2>
+    <p>This is the elephant in the room that nobody talks about. Doing research is <strong>frustrating</strong>. There are days when you will spend 8 hours looking at code and find <strong>nothing</strong>. There are weeks when you think you are on the right path and discover that the "bug" you found is not exploitable. There are months when you simply find nothing.</p>
+
+    <p>And you know what? <strong>This is normal</strong>. It is part of the process. The best researchers in the world go through this too, the difference is that they <strong>do not give up</strong>.</p>
+
+    <p>Some things that help me deal with frustration:</p>
+
+    <ul>
+      <li><strong>Remember that every hour of research makes you better</strong>, even if you find nothing. You are learning the codebase, training your eye, accumulating knowledge.</li>
+      <li><strong>Talk to other people</strong> who do research. Exchanging ideas with someone who understands the pain makes a big difference.</li>
+      <li><strong>Take breaks</strong>. Seriously. Sometimes the best thing you can do for your research is close the computer and go do something else. Many times the solution comes when you are <strong>not</strong> actively thinking about the problem.</li>
+      <li><strong>Celebrate small wins</strong>. Understood a complex function? Win. Mapped a new entry point? Win. It does not need to be a CVE to count as progress.</li>
+    </ul>
+
+    <h2>Using AI as assistance</h2>
+    <p>Yes, I use AI in research and I am not ashamed to say it. But it is important to understand <strong>how</strong> to use it. AI will not find the bug for you (at least not yet hehehe), but it can help you with several things:</p>
+
+    <ul>
+      <li><strong>Understanding complex code</strong>: throw in a code snippet and ask it to explain what it does</li>
+      <li><strong>Brainstorming attack vectors</strong>: "given this component that does X, what possible attack vectors could there be?"</li>
+      <li><strong>Automating repetitive tasks</strong>: fuzzing scripts, log parsers, etc</li>
+      <li><strong>Rubber duck debugging</strong>: sometimes just by explaining the problem to AI you already notice the answer</li>
+    </ul>
+
+    <p>But be careful: <strong>do not blindly trust</strong> what AI tells you. It can be wrong, it can hallucinate, it can give you a false sense of security. Always <strong>validate</strong> what it tells you against the real code.</p>
+
+    <p>With this I hope you can find some bugs hehehe</p>
+  </div>
+
+  <footer>
+    <p><a href="../index.html">&lt;- home</a> // davi-1337 &copy; 2026</p>
+  </footer>
+
+</body>
+</html>
