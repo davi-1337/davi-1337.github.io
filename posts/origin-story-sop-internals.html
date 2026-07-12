@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>origin story (sop internals) ~ davi-1337</title>
+<link href="../assets/images.jpeg" rel="icon" type="image/jpeg"/>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a0a;
+      color: #b0b0b0;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 15px;
+      line-height: 1.7;
+      min-height: 100vh;
+      padding: 20px;
+      max-width: 760px;
+      margin: 0 auto;
+    }
+
+    ::selection { background: #00ff41; color: #0a0a0a; }
+    a { color: #00ff41; text-decoration: none; }
+    a:hover { color: #fff; }
+    .g { color: #00ff41; }
+
+    nav {
+      padding: 10px 0;
+      margin-bottom: 25px;
+      border-bottom: 1px solid #1a1a1a;
+      font-size: 13px;
+    }
+
+    nav a { margin-right: 20px; color: #666; }
+    nav a:hover { color: #00ff41; }
+
+    .post-header {
+      margin-bottom: 30px;
+      border-bottom: 1px solid #1a1a1a;
+      padding-bottom: 15px;
+    }
+
+    .post-header h1 {
+      color: #00ff41;
+      font-size: 18px;
+      font-weight: normal;
+      margin-bottom: 8px;
+    }
+
+    .post-meta { color: #444; font-size: 12px; }
+
+    .post-tag {
+      font-size: 11px;
+      padding: 1px 6px;
+      border: 1px solid #222;
+      margin-left: 8px;
+    }
+    .post-tag.web2 { border-color: #3b82f6; color: #3b82f6; }
+
+    .post-content h2 {
+      color: #00ff41;
+      font-size: 16px;
+      font-weight: normal;
+      margin: 25px 0 10px 0;
+    }
+
+    .post-content h3 {
+      color: #00ff41;
+      font-size: 15px;
+      font-weight: normal;
+      margin: 20px 0 10px 0;
+    }
+
+    .post-content p { margin-bottom: 12px; }
+    .post-content ul { margin: 10px 0 10px 20px; }
+    .post-content ol { margin: 10px 0 10px 25px; }
+    .post-content li { margin-bottom: 5px; }
+    .post-content img { max-width: 100%; border: 1px solid #1a1a1a; margin: 15px 0; }
+
+    .post-content blockquote {
+      border-left: 2px solid #00ff41;
+      margin: 15px 0;
+      padding-left: 12px;
+      color: #888;
+    }
+
+    .post-content hr {
+      border: 0;
+      border-top: 1px solid #1a1a1a;
+      margin: 25px 0;
+    }
+
+    .post-content code {
+      color: #00ff41;
+      background: #111;
+      padding: 1px 4px;
+    }
+
+    .post-content pre {
+      background: #111;
+      border: 1px solid #1a1a1a;
+      padding: 12px;
+      overflow-x: auto;
+      margin: 15px 0;
+    }
+
+    .post-content pre code {
+      background: transparent;
+      padding: 0;
+      color: #b0b0b0;
+    }
+
+    .post-content pre .src {
+      color: #555;
+      display: block;
+      margin-bottom: 8px;
+      font-size: 12px;
+      border-bottom: 1px solid #1a1a1a;
+      padding-bottom: 6px;
+    }
+    .post-content pre .src a { color: #666; }
+    .post-content pre .src a:hover { color: #00ff41; }
+</style>
+</head>
+<body>
+<nav>
+<a href="../index.html"><span class="g">[~]</span> home</a>
+<a href="../about.html"><span class="g">[~]</span> about</a>
+</nav>
+<div class="post-header">
+<h1>&gt; Origin Story (SOP Internals)</h1>
+<p class="post-meta">2026-07-12 // davi-1337 <span class="post-tag web2">web2</span></p>
+</div>
+<div class="post-content">
+
+<blockquote>
+<p>Every hero has an origin story. Turns out your browser has one too, and it's the single most important line of defense standing between the tab where you check your bank account and the tab playing some sketchy free-movie site. This post is the origin story of the origin (yeah, I'll stop).</p>
+</blockquote>
+
+<p><strong>Hello world!</strong> If you've read my other posts you know I've been obsessed with browsers for a while now. But most of the time when people talk about "browser security" they jump straight into the fun stuff, sandbox escapes, V8 type confusions, memory corruption, all that shiny weaponized chaos. And that's great (I love it). But there's a much quieter, much more fundamental thing that holds the entire web together, and almost nobody sits down to understand it <em>deeply</em>. That thing is the <strong>Same Origin Policy</strong>, or SOP.</p>
+
+<p>So this post is a bit different from my usual ones, there's no CVE, no 0day, no crash. Instead I want to do a full deep dive into what I'll call the <strong>SOP INTERNALS</strong>: how Chromium actually implements the Same Origin Policy under the hood, from the definition of an "origin" all the way down to the exact C++ that decides whether one frame is allowed to touch another. I'll cut the boring parts (the RFC-lawyer stuff) and keep just enough to actually understand how it works. Let's go :D</p>
+
+<hr/>
+
+<h2>Why does the SOP even exist?</h2>
+
+<p>Before we open a single source file, we need to understand the <strong>why</strong>. And to understand the why, you have to imagine a web <em>without</em> a Same Origin Policy. Seriously, stop and picture it for a second.</p>
+
+<p>You open two tabs. One is <code>your-bank.com</code>, logged in, session cookie and everything. The other is <code>totally-legit-free-games.biz</code>. In a world with no SOP, the JavaScript running on that random games site could just... open an invisible iframe pointing at your bank, read the DOM inside it, scrape your balance, grab the CSRF tokens, fire off a transfer, and read the response. No exploit needed. No bug needed. That's just <em>how the web would work</em>. The whole idea of "logging in" would be meaningless, because any site could act on your behalf on any other site.</p>
+
+<p>The SOP is the rule that says: <strong>content from one origin cannot read content or state from another origin</strong>. It's the invisible wall between tabs, between iframes, between everything. If you want a really good, visual, intuitive intro to <em>why</em> this policy has to exist, LiveOverflow made a fantastic video on it and I genuinely recommend pausing here and watching it, it's the exact mental model you want before diving into the code: <a href="https://www.youtube.com/watch?v=bSJm8-zJTzQ&amp;t=517s">The Same Origin Policy explained (LiveOverflow)</a>.</p>
+
+<p>Historically this idea is <em>old</em>. The Same Origin Policy was introduced by <strong>Netscape Navigator 2.02 back in 1995</strong>, right after JavaScript showed up in Netscape 2.0 and suddenly pages could programmatically touch the DOM. The moment scripting became a thing, the browser vendors realized "oh no, one page can now read another page", and the SOP was born to protect DOM access. A year later, in 1996, Netscape Navigator 3 introduced <code>document.domain</code> to <em>relax</em> that policy on purpose (we'll get to that horror later hehehe). So this policy is basically as old as client-side JavaScript itself. It has been patched, extended, and reasoned about for 30 years, and it's still the foundation everything else is built on.</p>
+
+<blockquote>
+<p>CORS, CSP, cookies' SameSite, COOP/COEP, site isolation... all of these are either extensions of, or reactions to, the Same Origin Policy. If you understand the SOP internals, everything else clicks into place.</p>
+</blockquote>
+
+<h2>Okay but what IS an "origin"?</h2>
+
+<p>Everyone repeats the same sentence: "an origin is the tuple of <strong>scheme, host, and port</strong>". And that's true, but it's the surface. Let me give the real definition, because in Chromium an origin is actually one of <em>two</em> very different things, and understanding the second one is where the SOP INTERNALS start getting interesting.</p>
+
+<p>In Chromium, the canonical representation lives in <code>url::Origin</code>. The class comment literally spells it out, an origin is <strong>either</strong>:</p>
+
+<pre><code><span class="src">// src: <a href="https://source.chromium.org/chromium/chromium/src/+/main:url/origin.h">https://source.chromium.org/chromium/chromium/src/+/main:url/origin.h</a></span>
+// An Origin is either:
+// - a tuple origin of (scheme, host, port), as described in RFC 6454, or
+// - an opaque origin with an internal value, and a memory of the tuple origin
+//   from which it was derived (its "precursor").
+//
+// The tuple is stored in |tuple_|. For opaque origins, |nonce_| is set.
+class Origin {
+  ...
+  SchemeHostPort tuple_;
+  std::optional&lt;Nonce&gt; nonce_;   // present ONLY for opaque origins
+
+  bool opaque() const { return nonce_.has_value(); }
+};</code></pre>
+
+<p>So the two kinds of origin are:</p>
+
+<ul>
+<li><strong>Tuple origin</strong>: your normal <code>(https, your-bank.com, 443)</code>. Boring, well-behaved, comparable by value.</li>
+<li><strong>Opaque origin</strong>: an origin that is same-origin with <em>nothing</em> but itself. It carries a unique unguessable <code>nonce_</code>, plus a "precursor" memory of where it came from. This is what a sandboxed iframe, a <code>data:</code> URL, or an <code>about:blank</code> in some contexts gets. We'll dedicate a whole section to these because they're where most SOP confusion (and bugs) live.</li>
+</ul>
+
+<p>The tuple itself is a separate little class, <code>SchemeHostPort</code>, which is just the three fields plus normalization logic:</p>
+
+<pre><code><span class="src">// src: <a href="https://source.chromium.org/chromium/chromium/src/+/main:url/scheme_host_port.h">https://source.chromium.org/chromium/chromium/src/+/main:url/scheme_host_port.h</a></span>
+// Represents the (scheme, host, port) of a tuple origin.
+class SchemeHostPort {
+  ...
+  std::string scheme_;
+  std::string host_;
+  uint16_t port_;
+};</code></pre>
+
+<p>One super important detail that a LOT of people get wrong: <strong>the path is NOT part of the origin</strong>. <code>https://site.com/a</code> and <code>https://site.com/b</code> are the exact same origin. The query, the fragment, the path, none of it matters. Only scheme+host+port. This is also exactly why Chromium's own security docs scream at developers to use <em>origins</em> and not <em>URLs</em> for security decisions, more on that at the end.</p>
+
+<h2>SOP INTERNALS: the two layers</h2>
+
+<p>Here's the first thing that surprised me when I started reading the actual code. There isn't <em>one</em> Same Origin Policy implementation in Chromium. There are basically two representations of an origin that have to agree with each other:</p>
+
+<ol>
+<li><strong><code>url::Origin</code></strong> (in <code>//url</code>) — the browser-process / "everywhere" representation. This is the one used in the C++ backend, in Mojo IPC, in network code, etc.</li>
+<li><strong><code>blink::SecurityOrigin</code></strong> (in Blink, the renderer) — the representation the actual rendering engine uses when it's deciding whether one frame's JavaScript can touch another frame's DOM.</li>
+</ol>
+
+<p>These two <em>must</em> stay in sync, and Chromium even has tests and past bugs specifically about making <code>blink::SecurityOrigin</code> and <code>url::Origin</code> agree with each other. When I say "SOP INTERNALS" for the rest of this post, I'm mostly talking about the Blink side, <code>SecurityOrigin</code>, because that's the layer that actually gates DOM access, which is the original thing the SOP was invented to protect.</p>
+
+<p>Let's open it up.</p>
+
+<h2>SOP INTERNALS: SecurityOrigin, the renderer's gatekeeper</h2>
+
+<p>The <code>SecurityOrigin</code> class is the heart of the SOP INTERNALS inside Blink. Its fields tell you almost everything about how the policy works, just look at what it stores:</p>
+
+<pre><code><span class="src">// src: <a href="https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/platform/weborigin/security_origin.h">https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/platform/weborigin/security_origin.h</a></span>
+class SecurityOrigin {
+  ...
+  String protocol_ = g_empty_string;   // scheme
+  String host_ = g_empty_string;       // host
+  String domain_ = g_empty_string;     // effective domain (document.domain!)
+  uint16_t port_ = 0;
+
+  // For opaque origins: the unique token that makes this origin
+  // same-origin with literally nothing but itself.
+  std::optional&lt;base::UnguessableToken&gt; nonce_if_opaque_;
+
+  // The tuple this opaque origin was derived from (its precursor).
+  scoped_refptr&lt;const SecurityOrigin&gt; precursor_origin_;
+
+  bool universal_access_ = false;
+  bool domain_was_set_in_dom_ = false;
+  bool can_load_local_resources_ = false;
+};</code></pre>
+
+<p>Notice a few things immediately:</p>
+
+<ul>
+<li>There's a <code>protocol_</code>, <code>host_</code>, <code>port_</code> — the tuple, exactly like <code>url::Origin</code>.</li>
+<li>There's a separate <code>domain_</code>, which starts equal to <code>host_</code> but can be changed by <code>document.domain</code>. This is the legacy relaxation mechanism.</li>
+<li>There's <code>nonce_if_opaque_</code> and <code>precursor_origin_</code> — the opaque-origin machinery.</li>
+<li>There's <code>universal_access_</code>, a "skip all checks" god-mode flag used for special contexts.</li>
+</ul>
+
+<p>The constructor sets <code>domain_</code> to be the same as <code>host_</code> initially, this matters a lot for the <code>document.domain</code> discussion:</p>
+
+<pre><code><span class="src">// src: <a href="https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/platform/weborigin/security_origin.cc">https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/platform/weborigin/security_origin.cc</a></span>
+SecurityOrigin::SecurityOrigin(const String&amp; protocol,
+                               const String&amp; host,
+                               uint16_t port)
+    : protocol_(protocol),
+      host_(host),
+      domain_(host_),          // domain starts as host
+      port_(port) {
+  ...
+  can_load_local_resources_ = IsLocal();
+}</code></pre>
+
+<h2>SOP INTERNALS: the actual same-origin check</h2>
+
+<p>This is the function. This is the one. If you only remember one piece of code from this entire post, make it <code>SecurityOrigin::IsSameOriginWith</code>. This is the literal implementation of "are these two things the same origin":</p>
+
+<pre><code><span class="src">// src: <a href="https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/platform/weborigin/security_origin.cc">https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/platform/weborigin/security_origin.cc</a></span>
+bool SecurityOrigin::IsSameOriginWith(const SecurityOrigin* other) const {
+  if (this == other)
+    return true;
+
+  // Opaque origins are same-origin ONLY with themselves,
+  // compared purely by nonce.
+  if (IsOpaque() || other-&gt;IsOpaque())
+    return nonce_if_opaque_ == other-&gt;nonce_if_opaque_;
+
+  // Otherwise: strict tuple comparison. host, then scheme, then port.
+  if (host_ != other-&gt;host_)
+    return false;
+
+  if (protocol_ != other-&gt;protocol_)
+    return false;
+
+  if (port_ != other-&gt;port_)
+    return false;
+
+  if (IsLocal() &amp;&amp; !PassesFileCheck(other))
+    return false;
+
+  return true;
+}</code></pre>
+
+<p>Read it slowly, because it's beautiful in how simple it is:</p>
+
+<ol>
+<li><strong>Same pointer?</strong> Same origin, done.</li>
+<li><strong>Either one opaque?</strong> Then they can only be same-origin if their <code>nonce_if_opaque_</code> values match. A non-opaque origin is <em>never</em> same-origin with an opaque one, and two different opaque origins (different nonces) are never same-origin either. This is the "same-origin with nothing but itself" property, implemented in one line.</li>
+<li><strong>Both are tuple origins?</strong> Then it's the classic scheme + host + port comparison. All three must match exactly.</li>
+<li><strong>Local (<code>file:</code>) scheme?</strong> There's an extra check because <code>file:</code> URLs are their own special nightmare.</li>
+</ol>
+
+<p>That's it. That's the "same origin" in Same Origin Policy. Notice how it maps <em>exactly</em> to the two kinds of origin we saw in <code>url::Origin</code>: tuple origins compare by tuple, opaque origins compare by nonce.</p>
+
+<h2>SOP INTERNALS: from "same origin" to "can you access this?"</h2>
+
+<p>Now, "same origin" and "allowed to access" are <em>not</em> the same thing, and this trips people up. The function that actually gates cross-frame DOM access is <code>SecurityOrigin::CanAccess</code>, and it's built on top of the same-origin logic but adds two extra concepts: <code>document.domain</code> relaxation and <strong>agent clusters</strong>.</p>
+
+<pre><code><span class="src">// src: <a href="https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/platform/weborigin/security_origin.cc">https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/platform/weborigin/security_origin.cc</a></span>
+bool SecurityOrigin::CanAccess(const SecurityOrigin* other,
+                               AccessResultDomainDetail&amp; detail) const {
+  // God mode: some special origins are allowed to touch everything.
+  if (universal_access_) {
+    detail = AccessResultDomainDetail::kDomainNotRelevant;
+    return true;
+  }
+
+  // The real check, this is where document.domain is honored.
+  bool can_access = IsSameOriginDomainWith(other, detail);
+
+  // Even if same-origin-domain, both frames must live in the SAME
+  // agent cluster, or access is denied.
+  if (can_access &amp;&amp; !cross_agent_cluster_access_ &amp;&amp;
+      !agent_cluster_id_.is_empty() &amp;&amp; !other-&gt;agent_cluster_id_.is_empty() &amp;&amp;
+      agent_cluster_id_ != other-&gt;agent_cluster_id_) {
+    detail = AccessResultDomainDetail::kDomainNotRelevantAgentClusterMismatch;
+    can_access = false;
+  }
+
+  return can_access;
+}</code></pre>
+
+<p>So the access decision is really three gates stacked:</p>
+
+<ol>
+<li><strong><code>universal_access_</code></strong> — a bypass for privileged contexts. If it's set, everything is allowed. (This is a flag you never want set on an attacker-controlled origin, obviously.)</li>
+<li><strong><code>IsSameOriginDomainWith</code></strong> — same-origin, but taking <code>document.domain</code> into account.</li>
+<li><strong>Agent cluster match</strong> — even if the origins are "the same domain", the two documents must be in the same agent cluster (roughly: the same synchronous scripting group). This is a newer defense that limits the blast radius of <code>document.domain</code> and cross-origin isolation.</li>
+</ol>
+
+<p>This <code>CanAccess</code> is what ultimately gets called, through Blink's binding layer, whenever JavaScript in one window reaches for another window's properties. That binding-layer entry point lives here:</p>
+
+<pre><code><span class="src">// src: <a href="https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/bindings/core/v8/binding_security.cc">https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/bindings/core/v8/binding_security.cc</a></span>
+// BindingSecurity::ShouldAllowAccessTo(...) is the V8-binding
+// chokepoint that guards cross-window property access.
+// It resolves both frames' SecurityOrigins and ultimately asks
+// accessing_origin->CanAccess(target_origin).
+//
+// If this returns false, Blink throws a SecurityError (or returns
+// undefined) instead of letting the read/write through.</code></pre>
+
+<p>So the full path, when <code>evil.com</code>'s JS does <code>otherWindow.document.cookie</code>, looks roughly like:</p>
+
+<pre><code>JS property access
+   -&gt; V8 binding
+   -&gt; BindingSecurity::ShouldAllowAccessTo
+   -&gt; SecurityOrigin::CanAccess
+   -&gt; IsSameOriginDomainWith  (+ agent cluster check)
+   -&gt; IsSameOriginWith        (tuple or nonce comparison)</code></pre>
+
+<p>Every single cross-window DOM access in Chromium funnels through this. THIS is the SOP INTERNALS in one call stack.</p>
+
+<h2>SOP INTERNALS: document.domain, the legacy footgun</h2>
+
+<p>Remember I said Netscape added <code>document.domain</code> in 1996 to <em>relax</em> the SOP on purpose? That's the <code>domain_</code> field we saw earlier, and the reason <code>CanAccess</code> calls <code>IsSameOriginDomainWith</code> instead of the plain <code>IsSameOriginWith</code>.</p>
+
+<p>The idea: two pages, <code>catalog.example.com</code> and <code>orders.example.com</code>, are <em>not</em> same-origin (different hosts). But if both of them run:</p>
+
+<pre><code>document.domain = "example.com";</code></pre>
+
+<p>...then the browser flips <code>domain_was_set_in_dom_ = true</code> on both, rewrites <code>domain_</code> to <code>"example.com"</code>, and now <code>IsSameOriginDomainWith</code> compares the <em>domains</em> instead of the full hosts, letting the two frames talk. Conceptually the check does something like this:</p>
+
+<pre><code><span class="src">// src: <a href="https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/platform/weborigin/security_origin.cc">https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/platform/weborigin/security_origin.cc</a></span>
+// Inside IsSameOriginDomainWith (simplified):
+//
+// Opaque origins never do domain relaxation, compare by nonce.
+if (IsOpaque() || other-&gt;IsOpaque())
+  return nonce_if_opaque_ == other-&gt;nonce_if_opaque_;
+
+// The scheme still has to match.
+if (protocol_ != other-&gt;protocol_)
+  return false;
+
+bool can_access = false;
+if (!domain_was_set_in_dom_ &amp;&amp; !other-&gt;domain_was_set_in_dom_) {
+  // Neither touched document.domain: strict host + port.
+  can_access = host_ == other-&gt;host_ &amp;&amp; port_ == other-&gt;port_;
+} else if (domain_was_set_in_dom_ &amp;&amp; other-&gt;domain_was_set_in_dom_) {
+  // BOTH opted in: compare the relaxed domain_ instead of host_.
+  // Note: port is intentionally ignored in this branch.
+  can_access = domain_ == other-&gt;domain_;
+}
+// If only ONE side set document.domain, access is denied.
+return can_access;</code></pre>
+
+<p>Notice the crucial detail: <strong>both</strong> sides have to opt in by setting <code>document.domain</code>. If only one frame sets it, access is denied. And once you've set it, the port is ignored in that comparison branch, which is exactly the kind of weird edge behavior that made <code>document.domain</code> such a historically dangerous feature.</p>
+
+<p>This mechanism is so footgun-y that Chrome has been actively working to <strong>disable <code>document.domain</code>-based relaxation by default</strong>, gating it behind <code>Origin-Agent-Cluster</code> headers. The modern web is trying to kill this 1996 feature, and the agent-cluster check we saw in <code>CanAccess</code> is part of that effort, it makes sure that even if you relax <code>document.domain</code>, you can't reach across an origin-isolated boundary.</p>
+
+<h2>SOP INTERNALS: opaque origins, nonces and precursors</h2>
+
+<p>Okay, now the part I find genuinely fascinating and where the real subtlety of the SOP INTERNALS lives: <strong>opaque origins</strong>.</p>
+
+<p>A tuple origin is easy, it's just scheme+host+port. But what's the origin of:</p>
+
+<ul>
+<li>a <code>data:text/html,...</code> document?</li>
+<li>an <code>&lt;iframe sandbox&gt;</code> without <code>allow-same-origin</code>?</li>
+<li>an <code>about:blank</code> in certain navigation contexts?</li>
+<li>a document served with a weird/unknown scheme?</li>
+</ul>
+
+<p>None of these have a meaningful, trustworthy tuple. If Chromium just handed them <code>(null, "", 0)</code> and compared by tuple, then <em>every</em> sandboxed iframe would be same-origin with every other sandboxed iframe, which would be a catastrophe. So instead Chromium gives each of them an <strong>opaque origin</strong>: a fresh, globally-unique <code>nonce_</code> (an <code>UnguessableToken</code>) that is same-origin with itself and nothing else.</p>
+
+<pre><code><span class="src">// src: <a href="https://source.chromium.org/chromium/chromium/src/+/main:url/origin.h">https://source.chromium.org/chromium/chromium/src/+/main:url/origin.h</a></span>
+// A Nonce wraps a lazily-initialized UnguessableToken. Two opaque
+// origins are same-origin iff their tokens are equal, which only
+// happens if one was copied from the other.
+class Nonce {
+  ...
+  mutable base::UnguessableToken token_;
+};</code></pre>
+
+<p>But here's the elegant part: an opaque origin doesn't fully forget where it came from. It keeps a <strong>precursor</strong>, the tuple origin it was derived from, stored in <code>tuple_</code> (in <code>url::Origin</code>) or <code>precursor_origin_</code> (in <code>SecurityOrigin</code>). This is why the accessor is literally named:</p>
+
+<pre><code><span class="src">// src: <a href="https://source.chromium.org/chromium/chromium/src/+/main:url/origin.h">https://source.chromium.org/chromium/chromium/src/+/main:url/origin.h</a></span>
+// For opaque origins, returns the *precursor* tuple (where it came
+// from). For tuple origins, returns the tuple itself.
+const SchemeHostPort&amp; GetTupleOrPrecursorTupleIfOpaque() const {
+  return tuple_;
+}
+
+bool opaque() const { return nonce_.has_value(); }</code></pre>
+
+<p>Why keep the precursor at all if opaque origins can't access anything? Because some downstream decisions (like blob URL handling, some CSP reporting, and debugging) need to know "this locked-down sandbox <em>came from</em> <code>https://evil.com</code>", even though it isn't allowed to <em>act</em> as <code>https://evil.com</code>. The precursor is memory, not authority. That distinction, memory of where you came from vs. the authority to act as it, is one of the most elegant ideas in the whole SOP INTERNALS.</p>
+
+<p>How do you create one of these? Through the <code>url::Origin</code> factory methods:</p>
+
+<pre><code><span class="src">// src: <a href="https://source.chromium.org/chromium/chromium/src/+/main:url/origin.cc">https://source.chromium.org/chromium/chromium/src/+/main:url/origin.cc</a></span>
+// Create() derives an origin from a URL. For non-standard / opaque
+// cases it returns a fresh opaque origin (new nonce).
+static Origin Create(const GURL&amp; url);
+
+// Resolve() is the inheritance-aware version: given a URL and a
+// base_origin, it decides whether the result inherits base_origin
+// (e.g. about:blank inheriting its opener) or becomes a fresh opaque
+// origin carrying base_origin as its precursor (e.g. data: URLs).
+static Origin Resolve(const GURL&amp; url, const Origin&amp; base_origin);</code></pre>
+
+<p>The difference between <code>Create</code> and <code>Resolve</code> is exactly the difference between "what origin does this URL have on its own" and "what origin does this URL get when loaded <em>inside</em> a document that already has an origin". <code>about:blank</code> is the classic example: on its own it's nothing, but loaded from <code>https://a.com</code> it <em>inherits</em> <code>https://a.com</code>'s origin. That inheritance logic is pure SOP INTERNALS and it's the source of endless subtle security discussions.</p>
+
+<h2>SOP INTERNALS: agent clusters</h2>
+
+<p>I mentioned agent clusters in <code>CanAccess</code>, let me explain why they exist, because it's a modern (and important) layer.</p>
+
+<p>Same-origin isn't only about "can I read your DOM". It's also about "can we share synchronous, mutable memory" — think <code>SharedArrayBuffer</code>, synchronous scripting, <code>document.domain</code>. Post-Spectre, the browser can't just let any two same-origin-<em>looking</em> documents share memory synchronously, because that opens timing side channels. So Chromium groups documents into <strong>agent clusters</strong>: sets of execution contexts that are allowed to synchronously script each other. Two documents can pass the tuple/domain check and <em>still</em> be denied access if they're in different agent clusters (for example when one has opted into origin isolation via <code>Origin-Agent-Cluster</code>).</p>
+
+<p>That's the <code>agent_cluster_id_ != other-&gt;agent_cluster_id_</code> branch we saw. It's the SOP evolving from a pure "scheme/host/port" rule into something that also accounts for process/memory isolation. The 1995 policy grew up hehehe.</p>
+
+<h2>SOP INTERNALS: why origin and not URL?</h2>
+
+<p>One thing I want to hammer, because it's a genuine, recurring source of real vulnerabilities in Chromium's own code: <strong>security decisions must be made on origins, not URLs.</strong> Chromium has an entire doc about this, and it's worth reading:</p>
+
+<pre><code><span class="src">// src: <a href="https://source.chromium.org/chromium/chromium/src/+/main:docs/security/origin-vs-url.md">https://source.chromium.org/chromium/chromium/src/+/main:docs/security/origin-vs-url.md</a></span>
+// "URLs are often not sufficient for security decisions, since the
+//  origin may not be present in the URL (e.g. about:blank), may be
+//  tricky to parse (e.g. blob: or filesystem: URLs), or may be
+//  opaque despite a normal-looking URL."</code></pre>
+
+<p>Think about everything we just learned:</p>
+
+<ul>
+<li>An <code>about:blank</code> URL tells you nothing, its origin is <em>inherited</em>.</li>
+<li>A <code>blob:https://evil.com/uuid</code> URL <em>looks</em> like it has an origin baked in, but you need to parse it correctly and you must not trust the string.</li>
+<li>A sandboxed frame can have a perfectly normal-looking URL but be an <em>opaque</em> origin with no authority at all.</li>
+</ul>
+
+<p>If some piece of C++ takes a <code>GURL</code>, chops off the path, and compares the resulting "origin-as-a-URL" string, it will get all of these cases wrong. That's why the doc calls using a <code>GURL</code> as an origin an <strong>anti-pattern</strong>, and why the correct code uses <code>GetLastCommittedOrigin()</code> on the browser side or <code>GetSecurityOrigin()</code> on the renderer side. A whole class of real Chromium security bugs is just "someone made a security decision on a URL string instead of a <code>url::Origin</code>". If you ever go hunting for logic bugs in the browser (like I like to do hehehe), origin-vs-URL confusion is a genuinely productive thing to look for.</p>
+
+<h2>Putting it all together</h2>
+
+<p>So let's zoom all the way back out. The Same Origin Policy, the thing that keeps <code>evil.com</code> out of your bank tab, is in Chromium ultimately just this:</p>
+
+<ol>
+<li>Every document gets an <strong>origin</strong>: either a tuple <code>(scheme, host, port)</code> or an <strong>opaque</strong> origin with a unique nonce and a memory of its precursor.</li>
+<li>Two representations of it, <code>url::Origin</code> (everywhere) and <code>blink::SecurityOrigin</code> (renderer), that are kept in agreement.</li>
+<li>When JS tries to reach across windows, <code>BindingSecurity::ShouldAllowAccessTo</code> calls <code>SecurityOrigin::CanAccess</code>.</li>
+<li><code>CanAccess</code> stacks three gates: <code>universal_access_</code> god-mode, then <code>IsSameOriginDomainWith</code> (which folds in the legacy <code>document.domain</code> relaxation), then the <strong>agent cluster</strong> check.</li>
+<li>Underneath it all, <code>IsSameOriginWith</code> does the timeless thing: tuple origins compare by scheme+host+port, opaque origins compare by nonce, and never the twain shall mix.</li>
+</ol>
+
+<p>That's the whole origin story. A rule from 1995 that started as "don't let one script read another script's page", grown over 30 years into a layered system of tuples, nonces, precursors, domains, and agent clusters, all still enforcing that same simple, beautiful idea: <em>your stuff is yours, and their stuff is theirs.</em></p>
+
+<p>I didn't drop a bug in this one, but understanding the SOP INTERNALS this deeply is exactly the kind of foundation that lets you <em>find</em> bugs later, because now when you see some code make a security decision on a URL, or handle an opaque origin sloppily, or trust <code>document.domain</code>, a little alarm goes off in your head. And that alarm is worth more than any single CVE. :D</p>
+
+<p>See you in the next one. Bye!</p>
+
+<hr/>
+
+<h2>References</h2>
+<ul>
+<li><a href="https://www.youtube.com/watch?v=bSJm8-zJTzQ&amp;t=517s">LiveOverflow — The Same Origin Policy explained</a></li>
+<li><a href="https://source.chromium.org/chromium/chromium/src/+/main:url/origin.h">url/origin.h</a> — <code>url::Origin</code>, tuple vs opaque origins, nonce, precursor</li>
+<li><a href="https://source.chromium.org/chromium/chromium/src/+/main:url/origin.cc">url/origin.cc</a> — <code>Create()</code> / <code>Resolve()</code> origin derivation</li>
+<li><a href="https://source.chromium.org/chromium/chromium/src/+/main:url/scheme_host_port.h">url/scheme_host_port.h</a> — the (scheme, host, port) tuple</li>
+<li><a href="https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/platform/weborigin/security_origin.h">third_party/blink/renderer/platform/weborigin/security_origin.h</a> — <code>blink::SecurityOrigin</code></li>
+<li><a href="https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/platform/weborigin/security_origin.cc">third_party/blink/renderer/platform/weborigin/security_origin.cc</a> — <code>IsSameOriginWith</code>, <code>CanAccess</code>, <code>IsSameOriginDomainWith</code></li>
+<li><a href="https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/bindings/core/v8/binding_security.cc">third_party/blink/renderer/bindings/core/v8/binding_security.cc</a> — <code>ShouldAllowAccessTo</code></li>
+<li><a href="https://source.chromium.org/chromium/chromium/src/+/main:docs/security/origin-vs-url.md">docs/security/origin-vs-url.md</a> — why origins, not URLs, for security decisions</li>
+<li><a href="https://developer.chrome.com/blog/immutable-document-domain">Chrome for Developers — disabling document.domain relaxation</a></li>
+<li><a href="https://developer.mozilla.org/en-US/docs/Web/Security/Same-origin_policy">MDN — Same-origin policy</a></li>
+<li><a href="https://en.wikipedia.org/wiki/Same-origin_policy">Wikipedia — Same-origin policy (history)</a></li>
+</ul>
+
+</div>
+<footer>
+<p><a href="../index.html">&lt;- home</a> // davi-1337 © 2026</p>
+</footer>
+</body>
+</html>
