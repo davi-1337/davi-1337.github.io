@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>access denied (nt access internals) ~ davi-1337</title>
+<link href="../assets/images.jpeg" rel="icon" type="image/jpeg"/>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a0a;
+      color: #b0b0b0;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 15px;
+      line-height: 1.7;
+      min-height: 100vh;
+      padding: 20px;
+      max-width: 760px;
+      margin: 0 auto;
+    }
+
+    ::selection { background: #00ff41; color: #0a0a0a; }
+    a { color: #00ff41; text-decoration: none; }
+    a:hover { color: #fff; }
+    .g { color: #00ff41; }
+
+    nav {
+      padding: 10px 0;
+      margin-bottom: 25px;
+      border-bottom: 1px solid #1a1a1a;
+      font-size: 13px;
+    }
+
+    nav a { margin-right: 20px; color: #666; }
+    nav a:hover { color: #00ff41; }
+
+    .post-header {
+      margin-bottom: 30px;
+      border-bottom: 1px solid #1a1a1a;
+      padding-bottom: 15px;
+    }
+
+    .post-header h1 {
+      color: #00ff41;
+      font-size: 18px;
+      font-weight: normal;
+      margin-bottom: 8px;
+    }
+
+    .post-meta { color: #444; font-size: 12px; }
+
+    .post-tag {
+      font-size: 11px;
+      padding: 1px 6px;
+      border: 1px solid #222;
+      margin-left: 8px;
+    }
+    .post-tag.win { border-color: #f59e0b; color: #f59e0b; }
+
+    .post-content h2 {
+      color: #00ff41;
+      font-size: 16px;
+      font-weight: normal;
+      margin: 25px 0 10px 0;
+    }
+
+    .post-content h3 {
+      color: #00ff41;
+      font-size: 15px;
+      font-weight: normal;
+      margin: 20px 0 10px 0;
+    }
+
+    .post-content p { margin-bottom: 12px; }
+    .post-content ul { margin: 10px 0 10px 20px; }
+    .post-content ol { margin: 10px 0 10px 25px; }
+    .post-content li { margin-bottom: 5px; }
+    .post-content img { max-width: 100%; border: 1px solid #1a1a1a; margin: 15px 0; }
+
+    .post-content blockquote {
+      border-left: 2px solid #00ff41;
+      margin: 15px 0;
+      padding-left: 12px;
+      color: #888;
+    }
+
+    .post-content hr {
+      border: 0;
+      border-top: 1px solid #1a1a1a;
+      margin: 25px 0;
+    }
+
+    .post-content code {
+      color: #00ff41;
+      background: #111;
+      padding: 1px 4px;
+    }
+
+    .post-content pre {
+      background: #111;
+      border: 1px solid #1a1a1a;
+      padding: 12px;
+      overflow-x: auto;
+      margin: 15px 0;
+    }
+
+    .post-content pre code {
+      background: transparent;
+      padding: 0;
+      color: #b0b0b0;
+    }
+
+    .post-content pre .src {
+      color: #555;
+      display: block;
+      margin-bottom: 8px;
+      font-size: 12px;
+      border-bottom: 1px solid #1a1a1a;
+      padding-bottom: 6px;
+    }
+    .post-content pre .src a { color: #666; }
+    .post-content pre .src a:hover { color: #00ff41; }
+</style>
+</head>
+<body>
+<nav>
+<a href="../index.html"><span class="g">[~]</span> home</a>
+<a href="../about.html"><span class="g">[~]</span> about</a>
+</nav>
+<div class="post-header">
+<h1>&gt; Access Denied (NT Access Internals)</h1>
+<p class="post-meta">2026-08-05 // davi-1337 <span class="post-tag win">windows</span></p>
+</div>
+<div class="post-content">
+
+<blockquote>
+<p>Last month I wrote about how Chromium decides whether one page can touch another. This month I want to ask the same question one layer down, on the operating system itself: when you type <code>CreateFile("C:\secret.txt")</code>, who exactly decides that you can't? The answer is a 33-year-old piece of logic that almost nobody has actually read, and it's sitting under every single Windows privilege escalation you've ever seen.</p>
+</blockquote>
+
+<p><strong>Hello world!</strong> In my last post I did a deep dive into the <a href="./origin-story-sop-internals.html">SOP INTERNALS</a>, how Chromium implements the Same Origin Policy. A bunch of people told me they liked that format, "no CVE, no crash, just open the source and understand how the thing really decides". So I want to do it again, but this time on Windows.</p>
+
+<p>Here's the thing that got me started. The Same Origin Policy answers one question: <em>"are you allowed to touch this?"</em>. And it answers it by comparing a tuple. Windows answers the exact same question, millions of times per second, on every file, every registry key, every process, every mutex, every named pipe. But it doesn't compare a tuple. It runs an <strong>algorithm</strong>. And that algorithm is published, in full, as pseudocode, by Microsoft, in a protocol spec that basically nobody reads.</p>
+
+<p>So this post is the <strong>NT ACCESS INTERNALS</strong>: the complete journey from a string like <code>"C:\secret.txt"</code> to either a handle in your hand or <code>ERROR_ACCESS_DENIED</code> in your face. No assembly, no ROP, no shellcode. Pure logic. And at the end I'll show you why this is one of the most productive places to go bug hunting on Windows, with real output from my own machine. Let's go :D</p>
+
+<hr/>
+
+<h2>Why does this even exist?</h2>
+
+<p>Same as last time, before we open anything, we need the <strong>why</strong>.</p>
+
+<p>Windows NT was designed in the late 80s and shipped in 1993, and it was built by people who came from VMS and who had one very specific goal: get NT certified at <strong>C2 security level</strong> under the US DoD "Orange Book". That sounds like boring compliance trivia, but it's actually the single most important fact about how Windows security works, because C2 required things like discretionary access control, object reuse protection, and auditing, and the only sane way to build that is to put <strong>one</strong> component in charge of every access decision.</p>
+
+<p>That component is the <strong>Security Reference Monitor</strong> (SRM), and it lives in the kernel. The design rule is beautifully simple:</p>
+
+<blockquote>
+<p>Identity and authority are two different things, stored in two different places, and exactly one function is allowed to combine them.</p>
+</blockquote>
+
+<ul>
+<li><strong>Identity</strong> lives in an <strong>access token</strong>, attached to your process (or thread). It's a bag of SIDs: who you are, what groups you're in, what privileges you hold, what integrity level you run at.</li>
+<li><strong>Authority</strong> lives in a <strong>security descriptor</strong>, attached to the object. It says who is allowed to do what to <em>this specific thing</em>.</li>
+<li><strong>The decision</strong> is made by the SRM, and only by the SRM.</li>
+</ul>
+
+<p>Compare that to the SOP for a second. Chromium's <code>IsSameOriginWith</code> asks "are these two things the same?". Windows never asks that. There's no notion of "same user" as a security check. Windows asks: <strong>"does this bag of SIDs satisfy this list of rules?"</strong>. It's not an identity comparison, it's a policy evaluation. That difference is why the Windows model is so much more expressive, and so much easier to get subtly wrong.</p>
+
+<h2>Everything is an object (and a handle is not a name)</h2>
+
+<p>Before the access check, we need to talk about what's actually being protected.</p>
+
+<p>In NT, essentially everything the kernel manages is an <strong>object</strong>, and they all share the same shape. Files, directories, processes, threads, registry keys, mutants, semaphores, events, ALPC ports, tokens, desktops, symbolic links, jobs, sections. Every single one of them is a blob of type-specific data with a common <code>OBJECT_HEADER</code> glued to the front of it, and that header is where the security descriptor pointer lives.</p>
+
+<p>This is why the same access check code can protect a file and a mutex. The Object Manager doesn't care what the object <em>is</em>. It cares that it has a header.</p>
+
+<p>Now, the part that took me embarrassingly long to internalize, and that changes how you look at Windows bugs forever:</p>
+
+<blockquote>
+<p>A handle is not a name. A handle is a <strong>capability</strong>.</p>
+</blockquote>
+
+<p>When you open something, the access check runs <strong>once</strong>. If it passes, the kernel writes an entry into your process's handle table containing a pointer to the object and a frozen <code>GrantedAccess</code> mask. From that moment on, <strong>the security descriptor is never consulted again for that handle</strong>. Every subsequent operation just checks "does this handle's GrantedAccess contain the bit I need?".</p>
+
+<p>Think about what that means. If you can get a handle with <code>WRITE_DATA</code>, and then the administrator fixes the DACL, <em>your handle still works</em>. If you can trick a privileged process into opening something on your behalf and handing you the handle, you inherit its decision, not its identity. The check is a one-time gate, and everything after it is trust.</p>
+
+<p>Hold onto that. It comes back at the end.</p>
+
+<h2>NT ACCESS INTERNALS: the two layers</h2>
+
+<p>Just like the SOP had two layers that had to agree (<code>url::Origin</code> and <code>blink::SecurityOrigin</code>), the NT access path has two layers, and they are completely independent:</p>
+
+<ol>
+<li><strong>Name resolution</strong> — turning a string into an object. This is the <strong>Object Manager</strong>'s job: <code>ObpLookupObjectName</code>. It walks a namespace, follows symbolic links, and eventually hands off to a device driver.</li>
+<li><strong>Access checking</strong> — turning a token plus a security descriptor into a granted access mask. This is the <strong>Security Reference Monitor</strong>'s job: <code>SeAccessCheck</code>.</li>
+</ol>
+
+<p>And here's the punchline of this whole blog post, so I'll say it early:</p>
+
+<blockquote>
+<p>Layer 1 decides <strong>which</strong> object you get. Layer 2 decides <strong>what you can do</strong> to it. Almost every Windows logic privilege escalation lives in the seam between them, because the code that made a decision about a <em>name</em> is not the code that resolved that name into an <em>object</em>.</p>
+</blockquote>
+
+<p>Let's do layer 1 first, because it's the one people underestimate.</p>
+
+<h2>NT ACCESS INTERNALS: a path's journey</h2>
+
+<p>Here's the full call stack for opening a file. This is our <code>BindingSecurity::ShouldAllowAccessTo</code> moment, the spine of the whole post:</p>
+
+<pre><code>CreateFileW("C:\Windows\System32\drivers\etc\hosts")
+   -&gt; RtlDosPathNameToNtPathName_U        // "C:\..." becomes "\??\C:\..."
+   -&gt; NtCreateFile(&amp;OBJECT_ATTRIBUTES)
+   -&gt; ObOpenObjectByName
+   -&gt; ObpLookupObjectName                 // walks the NT namespace, segment by segment
+        -&gt; ObpParseSymbolicLink           // "\??\C:" is a SYMLINK -&gt; STATUS_REPARSE
+        -&gt; ObpLookupObjectName (again)    // now resolving "\Device\HarddiskVolume3\..."
+        -&gt; IopParseDevice                 // the device swallows the rest of the path
+             -&gt; IRP_MJ_CREATE to NTFS
+             -&gt; SeAccessCheck             // &lt;-- THE decision
+   -&gt; handle written to the handle table, with a frozen GrantedAccess</code></pre>
+
+<p>Let's take it apart.</p>
+
+<h3>Step 1: your path is a lie</h3>
+
+<p><code>C:\Windows</code> is not a real path. The kernel has never heard of drive letters. Drive letters are a <strong>DOS compatibility layer</strong> that lives in the object namespace, and <code>RtlDosPathNameToNtPathName_U</code> in <code>ntdll.dll</code> is the function that translates your nostalgia into something NT understands. <code>C:\Windows</code> becomes <code>\??\C:\Windows</code>.</p>
+
+<p>So what is <code>\??\C:</code>? It's a <strong>symbolic link object</strong> sitting in the object namespace, and you can read its target from user mode without any privileges. Real output from my machine:</p>
+
+<pre><code>PS&gt; QueryDosDevice("C:")               -&gt; \Device\HarddiskVolume3
+PS&gt; QueryDosDevice("PhysicalDrive0")   -&gt; \Device\Harddisk0\DR0
+PS&gt; QueryDosDevice("Nul")              -&gt; \Device\Null
+PS&gt; QueryDosDevice("Con")              -&gt; \Device\ConDrv\Console</code></pre>
+
+<p>Look at <code>Nul</code> and <code>Con</code>. Those legendary "reserved filenames" that break every web upload form on the planet? They're not hardcoded magic. They are literally <strong>symbolic link objects in a directory</strong>, sitting right next to your C: drive. That's it. That's the whole mystery.</p>
+
+<p>And one detail that matters enormously for security: <code>\??\</code> is not one place. It's a <strong>per-session</strong> view. Each logon session gets its own DOS devices directory, which is merged on top of the machine-wide <code>\GLOBAL??</code>. Which means: <strong>a drive letter can mean different things to different users at the same time</strong>. Remember that when you see code that logs a path from one context and acts on it in another.</p>
+
+<h3>Step 2: the namespace walk and STATUS_REPARSE</h3>
+
+<p>Once you're in NT-land, <code>ObpLookupObjectName</code> takes over. It tokenizes the path on backslashes and walks it segment by segment, starting from the root. For each segment it either finds a directory entry, or it finds an object whose type has a <strong>parse procedure</strong>, in which case it calls that procedure and lets the object type take over the rest of the path.</p>
+
+<p>This is the elegant part. The NT namespace is not a tree. It's a tree that <strong>delegates</strong>. Each <code>OBJECT_TYPE</code> can register its own parse procedure, and when the walk hits an object of that type, the remaining path string is handed over wholesale.</p>
+
+<p>Two parse procedures matter to us. The first is the one for symbolic links, and its behaviour is the important part: it reads the link's target, concatenates whatever is left of the path onto it, and returns <code>STATUS_REPARSE</code>. That status code means something very specific: <em>"throw away what you were doing and start the entire lookup over with this new string"</em>.</p>
+
+<p>So resolving <code>\??\C:\Windows\System32\drivers\etc\hosts</code> actually goes like this:</p>
+
+<ol>
+<li>Walk to <code>\??</code>. It's a directory. Fine.</li>
+<li>Next segment is <code>C:</code>. Found an object, and its type is <code>SymbolicLink</code>, which has a parse procedure. Call it.</li>
+<li><code>ObpParseSymbolicLink</code> reads the target <code>\Device\HarddiskVolume3</code>, glues the remaining <code>\Windows\System32\drivers\etc\hosts</code> onto it, and returns <code>STATUS_REPARSE</code>.</li>
+<li>The lookup <strong>restarts from scratch</strong> with <code>\Device\HarddiskVolume3\Windows\System32\drivers\etc\hosts</code>.</li>
+<li>Walk to <code>\Device</code>, then <code>HarddiskVolume3</code>. That's a device object, and its parse procedure is <code>IopParseDevice</code>.</li>
+<li><code>IopParseDevice</code> takes the entire rest of the string, builds an <code>IRP_MJ_CREATE</code>, and ships it to NTFS. <strong>The Object Manager is now done.</strong> It never parsed <code>\Windows\System32\drivers\etc</code> at all.</li>
+</ol>
+
+<p>That step 6 is important and constantly misunderstood: <strong>the kernel does not walk your directory tree</strong>. The filesystem does. The object namespace stops at the volume.</p>
+
+<p>And since a link can point at another link, the reparse chain obviously has to be bounded, otherwise a two-link loop would hang the kernel. It is. That's why deeply chained reparse points fail with a status code instead of spinning forever.</p>
+
+<blockquote>
+<p>Source note: Windows isn't open source, so nobody can show you the real <code>ObpParseSymbolicLink</code>. <a href="https://reactos.org/">ReactOS</a> has its own version, but that's an unofficial reimplementation, not Microsoft's code. Everything here comes from Microsoft's docs or from experiments I ran.</p>
+</blockquote>
+
+<p>So let's do exactly that, because you can watch a reparse happen from PowerShell, with no debugger and no privileges at all. An NTFS junction is a reparse point, and creating one <strong>does not require administrator</strong>:</p>
+
+<pre><code>elevated = False
+
+PS&gt; cmd /c mklink /J C:\rp\link C:\rp\real
+PS&gt; type C:\rp\link\flag.txt         -&gt; you landed in REAL
+
+PS&gt; (Get-Item C:\rp\link).Attributes -&gt; Directory, ReparsePoint
+PS&gt; (Get-Item C:\rp\link).LinkType   -&gt; Junction
+PS&gt; (Get-Item C:\rp\link).Target     -&gt; C:\rp\real
+
+PS&gt; (repoint the junction at C:\rp\evil)
+PS&gt; type C:\rp\link\flag.txt         -&gt; you landed in EVIL</code></pre>
+
+<p>Look at what that proves. The attribute flags say it out loud: <code>Directory, ReparsePoint</code>. It's not a directory that happens to forward, it's an object that carries a reparse tag, and the filesystem re-resolves the path when it hits one.</p>
+
+<p>And then the last two lines: <strong>the exact same path string, byte for byte, resolved to a different file.</strong> No privileges. No exploit. No bug. That's just how name resolution works, and it's the entire foundation of the bug class we'll get to at the end of this post. Keep that image in your head: <em>a path is not a thing, it's a question, and someone else may be answering it.</em></p>
+
+<h3>Step 3: normalization is a Win32 lie</h3>
+
+<p>Now here's where it gets fun, and where I stopped reading and started experimenting.</p>
+
+<p>Everything above happens in the <strong>kernel</strong>. But before any of it, <code>kernel32.dll</code> silently rewrites your string. It collapses <code>.</code> and <code>..</code>, converts forward slashes to backslashes, and, my favourite, <strong>strips trailing dots and spaces</strong>. The kernel never sees what you typed.</p>
+
+<p>Unless you tell it not to. The <code>\\?\</code> prefix means "I know what I'm doing, pass this through verbatim". The <code>\\.\</code> prefix looks almost identical and does <em>not</em> mean that.</p>
+
+<p>I got tired of reading contradictory blog posts about this, so I just called <code>CreateFileW</code> directly through P/Invoke (no .NET or PowerShell path helpers in the way, those normalize behind your back and will lie to you) and asked the kernel. Real output, Windows 11:</p>
+
+<pre><code>err 2 = FILE_NOT_FOUND, 5 = ACCESS_DENIED, 123 = INVALID_NAME
+
+  OK         C:\Windows\System32\drivers\etc\hosts
+  OK         C:\Windows\System32\drivers\etc\hosts.
+  OK         C:\Windows\System32\drivers\etc\hosts␣␣␣
+  OK         C:\Windows\..\Windows\System32\drivers\etc\hosts
+
+  OK         \\?\C:\Windows\System32\drivers\etc\hosts
+  FAIL(2)    \\?\C:\Windows\System32\drivers\etc\hosts.
+  FAIL(2)    \\?\C:\Windows\System32\drivers\etc\hosts␣␣␣
+  FAIL(123)  \\?\C:\Windows\..\Windows\System32\drivers\etc\hosts
+  OK         \\.\C:\Windows\..\Windows\System32\drivers\etc\hosts
+
+  OK         \\?\GLOBALROOT\Device\HarddiskVolume3\Windows\System32\drivers\etc\hosts
+  FAIL(5)    \\?\GLOBALROOT\Device\HarddiskVolume1\Windows\System32\drivers\etc\hosts
+
+  FAIL(5)    C:\Windows\System32\config\SAM
+  FAIL(5)    \\?\C:\Windows\System32\config\SAM</code></pre>
+
+<p>Read that table slowly, there are four separate lessons in it:</p>
+
+<ol>
+<li><strong><code>hosts.</code> and <code>hosts&nbsp;&nbsp;&nbsp;</code> open the real file through Win32, and fail through <code>\\?\</code>.</strong> Same bytes on disk, different string, both work. The trailing junk was silently deleted by <code>kernel32</code>. With <code>\\?\</code> it reaches NTFS intact and NTFS says "no such file". So a blocklist that checks for the literal string <code>hosts</code> can be defeated by <code>hosts.</code>, and a path canonicalizer that "already normalized" a <code>\\?\</code> path just corrupted it.</li>
+<li><strong><code>\\?\</code> with <code>..</code> returns <code>ERROR_INVALID_NAME</code>, but <code>\\.\</code> with <code>..</code> works.</strong> These two prefixes are constantly treated as synonyms. They are not. <code>\\?\</code> skips normalization, <code>\\.\</code> does not. If you write a path validator that special-cases one, test the other.</li>
+<li><strong><code>\\?\GLOBALROOT\Device\HarddiskVolume3\...</code> opens the exact same file as <code>C:\...</code></strong>, with no drive letter anywhere in the string. That's the escape hatch out of the DOS namespace and straight into the raw NT namespace. Any sandbox or filter that reasons about drive letters is now decorative. (And <code>HarddiskVolume1</code> is my EFI partition, which is why it returns ACCESS_DENIED instead of not-found, that's a real access check firing.)</li>
+<li><strong>The SAM hive fails identically in every single form.</strong> Not found? No. Denied. Every path form resolved to the same object, and then layer 2 said no. <em>That's</em> the difference between the two layers, in one line of output.</li>
+</ol>
+
+<p>Point 4 is the transition. Name resolution succeeded perfectly. Now let's look at the thing that actually stopped us.</p>
+
+<h2>NT ACCESS INTERNALS: the actual access check</h2>
+
+<p>This is the one. If you remember one thing from this post, make it this algorithm, the way <code>IsSameOriginWith</code> was the one thing to remember from the SOP post.</p>
+
+<p>Here's the surprise: Microsoft published it. In full. As pseudocode. Not in the Windows Internals book, not in a leaked source drop, but in <strong>MS-DTYP</strong>, the Windows Data Types protocol specification, because remote protocols need to replicate the exact same semantics. It's been sitting on Microsoft Learn this whole time.</p>
+
+<p>Here it is, trimmed to the parts that matter (I cut the Active Directory object-tree branches and the Central Access Policy stuff, which are their own rabbit hole):</p>
+
+<pre><code><span class="src">// src: <a href="https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-dtyp/4f1bbcbb-814a-4c70-a11e-2a5b8779a6f9">MS-DTYP 2.5.3.2 Access Check Algorithm Pseudocode</a></span>
+EvaluateTokenAgainstDescriptor(Token, SecurityDescriptor,
+                               Access_Request_mask, ...)
+
+    Set DACL to SecurityDescriptor Dacl field
+    Set RemainingAccess to Access Request mask
+    Set AllowedAccesses to 0
+    Set DeniedAccesses to 0
+    Set MaxAllowedMode to FALSE
+
+    -- (1) SACL access is a PRIVILEGE, not a permission.
+    IF RemainingAccess contains ACCESS_SYSTEM_SECURITY THEN
+        IF Token.Privileges contains SeSecurityPrivilege THEN
+            Remove ACCESS_SYSTEM_SECURITY from RemainingAccess
+        ELSE
+            Return access_denied
+        END IF
+    END IF
+
+    -- (2) Taking ownership is also a privilege that bypasses the DACL.
+    IF RemainingAccess contains WRITE_OWNER THEN
+        IF Token.Privileges contains SeTakeOwnershipPrivilege THEN
+            Remove WRITE_OWNER from RemainingAccess
+        END IF
+    END IF
+
+    -- (3) The owner ALWAYS gets READ_CONTROL and WRITE_DAC.
+    --     You can never lock yourself out of your own object.
+    CALL SidInToken(Token, SecurityDescriptor.Owner, PrincipalSelfSubst)
+    IF SidInToken returns True THEN
+        IF DACL does not contain ACEs from object owner THEN
+            Remove READ_CONTROL and WRITE_DAC from RemainingAccess
+        END IF
+    END IF
+
+    IF RemainingAccess contains MAXIMUM_ALLOWED THEN
+        Set MaxAllowedMode to TRUE
+    END IF
+
+    -- (4) The loop. In DACL order. No sorting.
+    FOR each ACE in DACL DO
+        IF ACE.AceFlags does not contain INHERIT_ONLY_ACE THEN
+            CASE ACE.Type OF
+
+                CASE Allow Access:
+                    CALL SidInToken(Token, ACE.Sid, PrincipalSelfSubst)
+                    IF SidInToken returns True THEN
+                        IF MaxAllowedMode equals TRUE THEN
+                            Set AllowedAccesses to AllowedAccesses or ACE.AccessMask
+                        ELSE
+                            Remove ACE.AccessMask from RemainingAccess
+                        END IF
+                    END IF
+
+                CASE Deny Access:
+                    CALL SidInToken(Token, ACE.Sid, PrincipalSelfSubst)
+                    IF SidInToken returns True THEN
+                        IF MaxAllowedMode equals TRUE THEN
+                            Set DeniedAccesses to DeniedAccesses or ACE.AccessMask
+                        ELSE
+                            IF any bit of RemainingAccess is in ACE.AccessMask THEN
+                                Set GrantedAccess to 0
+                                Return access_denied        -- &lt;-- immediate exit
+                            END IF
+                        END IF
+                    END IF
+            END CASE
+        END IF
+    END FOR
+
+    IF MaxAllowedMode equals TRUE THEN
+        Set GrantedAccess to AllowedAccesses and (not DeniedAccesses)
+        IF GrantedAccess not equals 0 THEN Return success
+        ELSE Return access_denied
+    END IF
+
+    -- (5) Did we satisfy every single bit that was asked for?
+    IF RemainingAccess to 0 THEN
+        Return success
+    Else
+        Return access_denied
+    END IF</code></pre>
+
+<p>Beautiful, right? Let me walk the parts that surprised me.</p>
+
+<h3>It's a subtraction, not a comparison</h3>
+
+<p>This is the core mental model and it's completely different from the SOP. There is no "is this user allowed" boolean. There's an <strong>accumulator</strong>. <code>RemainingAccess</code> starts as everything you asked for, and every matching allow-ACE <em>subtracts</em> bits from it. At the end, if the bag is empty, you're in. If a single bit is left over, you're denied.</p>
+
+<p>Which means access can be assembled from <strong>multiple ACEs</strong>. You want <code>READ | WRITE</code>, one ACE grants you READ because you're in group A, another grants WRITE because you're in group B, neither ACE alone would satisfy you, and you get in. Nobody wrote a rule saying "members of A and B can read and write". It emerged.</p>
+
+<h3>Deny is an immediate exit, and order is not enforced</h3>
+
+<p>Look at the deny branch again: <code>Return access_denied</code>. Not "remember this and keep going". It exits. Right there.</p>
+
+<p>Combine that with the loop being in <strong>DACL order</strong> and you get the single most important operational fact about Windows ACLs:</p>
+
+<blockquote>
+<p>"Deny always wins" is <strong>false</strong>. Deny wins <em>if the kernel reaches it first</em>. If an allow-ACE earlier in the list already subtracted the bit from <code>RemainingAccess</code>, the later deny-ACE finds nothing to match and does nothing.</p>
+</blockquote>
+
+<p>The convention that deny-ACEs come first is called <strong>canonical order</strong>, and it is enforced by the Windows ACL <em>editor</em>, by <code>AddAccessDeniedAce</code> conventions, by the GUI. It is <strong>not</strong> enforced by the kernel. The kernel loops in whatever order the bytes are in.</p>
+
+<p>So: any code that builds a DACL by hand, in the wrong order, silently produces a security descriptor whose deny rules are decorative. That's not a memory corruption bug. That's not even a crash. It's a piece of software that looks correct in the properties dialog and isn't. Go grep for <code>AddAccessAllowedAce</code> called before <code>AddAccessDeniedAce</code> and tell me how it goes.</p>
+
+<h3>Privileges are a bypass layer, evaluated before the DACL</h3>
+
+<p>Notice steps (1) and (2) happen <strong>before the loop even starts</strong>. <code>SeSecurityPrivilege</code> and <code>SeTakeOwnershipPrivilege</code> remove bits from the request before any ACE is consulted. The DACL literally cannot stop them.</p>
+
+<p>And this pseudocode doesn't even show the biggest ones. <code>SeBackupPrivilege</code> and <code>SeRestorePrivilege</code> are handled further up, in <code>SeAccessCheck</code>'s callers: if you hold backup privilege and pass <code>FILE_FLAG_BACKUP_SEMANTICS</code>, you get read access to anything, DACL be damned. That's not a bug, it's the documented purpose. It's also why "this account only has SeBackupPrivilege, it's basically read-only, low risk" is one of the most expensive sentences in Windows administration.</p>
+
+<h3>Empty DACL vs NULL DACL</h3>
+
+<p>A tiny detail with enormous consequences, and one of my favourite pieces of Windows trivia:</p>
+
+<ul>
+<li>A <strong>NULL DACL</strong> (absent) means "there is no policy here". The loop has nothing to iterate. <code>RemainingAccess</code> never gets emptied... except the spec is explicit that a NULL DACL means <strong>any access check will succeed</strong>. Everyone gets everything.</li>
+<li>An <strong>empty DACL</strong> (present, zero ACEs) means "policy exists, and it grants nothing". <strong>Nobody</strong> gets access, except the owner via that implicit <code>READ_CONTROL | WRITE_DAC</code> in step (3).</li>
+</ul>
+
+<p>One is a wide-open door. The other is a sealed vault. They differ by a single null pointer, and they are trivially confused in code that does <code>if (dacl == NULL || dacl-&gt;AceCount == 0)</code>. If you find that pattern in a privileged service, you have found something worth an afternoon.</p>
+
+<h2>NT ACCESS INTERNALS: the DACL isn't the whole story</h2>
+
+<p>Everything above is <em>discretionary</em> access control. The "D" in DACL. It's discretionary because the object's owner gets to decide it.</p>
+
+<p>Post-Vista, there's a second, <strong>mandatory</strong> layer that the owner cannot opt out of: <strong>Mandatory Integrity Control</strong>. Every token has an integrity level (Untrusted, Low, Medium, High, System) and every object can carry a <code>SYSTEM_MANDATORY_LABEL_ACE</code> in its <strong>SACL</strong>. Microsoft published this pseudocode too:</p>
+
+<pre><code><span class="src">// src: <a href="https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-dtyp/ae69a089-473d-4c23-bf3d-7a12a9d11123">MS-DTYP 2.5.3.1.1 MandatoryIntegrityCheck Algorithm Pseudocode</a></span>
+-- Find the mandatory label ACE in the object's SACL (not the DACL!)
+Call FindAceByType WITH ObjectSecurityDescriptor.Sacl,
+      SYSTEM_MANDATORY_LABEL_ACE_TYPE, 0
+   RETURNING MandatoryACE, FoundIndex
+
+IF (ACE.AceFlags does not contain INHERIT_ONLY_ACE) THEN
+    Set AceMask to ObjectIntegrityAceMask
+    Set AceIntegritySID to the SID from the ACE
+ELSE
+    -- No label? Default policy: NO_WRITE_UP at Medium integrity.
+    Set AceMask to SYSTEM_MANDATORY_LABEL_NO_WRITE_UP
+    Set AceIntegritySID to DefaultMandatorySID    -- S-1-16-8192 (ML_MEDIUM)
+END IF
+
+CALL SidDominates(IntegrityLevelSID, AceIntegritySID)
+  -- TokenDominates = "is my integrity &gt;= the object's?"
+
+IF TokenDominates is FALSE THEN
+    IF AceMask &amp; SYSTEM_MANDATORY_LABEL_NO_READ_UP THEN
+        Remove GENERIC_READ from MandatoryInformation.AllowedAccess
+    IF AceMask &amp; SYSTEM_MANDATORY_LABEL_NO_WRITE_UP THEN
+        Remove GENERIC_WRITE from MandatoryInformation.AllowedAccess
+    IF AceMask &amp; SYSTEM_MANDATORY_LABEL_NO_EXECUTE_UP THEN
+        Remove GENERIC_EXECUTE from MandatoryInformation.AllowedAccess
+END IF
+
+IF Token.Privileges contains SeRelabelPrivilege THEN
+    Add WRITE_OWNER to MandatoryInformation.AllowedAccess
+END IF</code></pre>
+
+<p>Three things worth burning into your memory:</p>
+
+<ol>
+<li><strong>The default is NO_WRITE_UP at Medium.</strong> Almost nothing on your disk has an explicit integrity label. That <code>ELSE</code> branch is the common case, not the exception. It's why a Low integrity sandboxed process (browser renderer, AppContainer) can <em>read</em> most of your disk but not write to it.</li>
+<li><strong>It produces a ceiling, not a verdict.</strong> The output is <code>AllowedAccess</code>, a mask that constrains what the DACL is subsequently allowed to grant. Both layers must agree. MIC can only ever take away.</li>
+<li><strong>Read-up is allowed by default.</strong> This is not Bell-LaPadula. Integrity protects <em>integrity</em>, not confidentiality. A Low process reading your documents is the designed behaviour. That surprises people constantly.</li>
+</ol>
+
+<h2>The security descriptor is itself a securable object</h2>
+
+<p>Okay, story time, because this one made me laugh.</p>
+
+<p>I wanted to dump some real security descriptors for this post, so I ran <code>Get-Acl</code> on a few things as a normal user. Real output:</p>
+
+<pre><code>  [C:\Windows\System32\drivers\etc\hosts]
+    SDDL : O:SYG:SYD:(A;ID;FA;;;SY)(A;ID;FA;;;BA)(A;ID;0x1200a9;;;BU)
+                     (A;ID;0x1200a9;;;AC)(A;ID;0x1200a9;;;S-1-15-2-2)
+
+  [C:\Windows\System32\config\SAM] -&gt; UnauthorizedAccessException
+  [C:\Windows\Temp]                -&gt; UnauthorizedAccessException
+
+  SACL of anything                 -&gt; PrivilegeNotHeldException</code></pre>
+
+<p>Look at what just happened. I couldn't read the SAM's DACL. Not modify it, <em>read</em> it. Why?</p>
+
+<p>Because reading a security descriptor requires <code>READ_CONTROL</code>, and <code>READ_CONTROL</code> is an access right like any other, so <strong>it goes through the access check</strong>. The rules are protected by the rules. It's recursive, and the recursion bottoms out at step (3) of the pseudocode: the owner always gets <code>READ_CONTROL</code>, so the system can never fully brick an object.</p>
+
+<p>And the SACL failure is even better. It threw <code>PrivilegeNotHeldException</code>, a <em>different</em> exception, because reading a SACL doesn't require a permission at all, it requires <code>ACCESS_SYSTEM_SECURITY</code>, which requires <code>SeSecurityPrivilege</code>. Which is <strong>literally the first branch of the pseudocode we just read</strong>. I didn't set out to test that. I just tried to dump an ACL and the very first ten lines of MS-DTYP reached out and slapped me.</p>
+
+<p>Now look at the <code>hosts</code> SDDL, because we're about to need it: <code>(A;ID;0x1200a9;;;BU)</code>. BUILTIN\Users get access mask <code>0x1200a9</code>. Remember that number.</p>
+
+<h2>NT ACCESS INTERNALS: MAXIMUM_ALLOWED, the DACL scanner</h2>
+
+<p>Remember <code>MaxAllowedMode</code> in the pseudocode? I skipped past it. Let's go back, because this is the part I actually want you to steal for your own research.</p>
+
+<p>Normally you open something by asking a <strong>question</strong>: "can I have <code>WRITE_DATA</code>?" Yes or no. If you want to know everything you can do to an object, you'd have to brute force it, one bit at a time, generating a pile of audit events and taking forever.</p>
+
+<p><code>MAXIMUM_ALLOWED</code> flips it into a <strong>request for information</strong>. Look at what the algorithm does in that mode: it stops early-exiting on deny, walks the <em>entire</em> DACL, accumulates every allow into <code>AllowedAccesses</code> and every deny into <code>DeniedAccesses</code>, and returns:</p>
+
+<pre><code>Set GrantedAccess to AllowedAccesses and (not DeniedAccesses)</code></pre>
+
+<p>One syscall. Complete answer. "Here is precisely what you are permitted to do to this object." Microsoft's own docs say its use is "not recommended". For a defender writing an application, sure. For someone mapping an attack surface, it's the single best primitive on the platform.</p>
+
+<p>So I wrote a tiny prober: open with <code>MAXIMUM_ALLOWED</code>, then <code>NtQueryObject(ObjectBasicInformation)</code> to read back the <code>GrantedAccess</code> the kernel actually stamped on my handle. Real output, standard non-elevated user, Windows 11:</p>
+
+<pre><code>  C:\Windows\System32\drivers\etc\hosts
+      0x001200A9  READ_DATA READ_EA EXECUTE READ_ATTR READ_CONTROL SYNCHRONIZE
+
+  C:\Windows\System32\kernel32.dll
+      0x001200A9  READ_DATA READ_EA EXECUTE READ_ATTR READ_CONTROL SYNCHRONIZE
+
+  C:\Windows\System32\config\SAM
+      DENIED (err 5)
+
+  C:\Windows\Temp
+      0x001000A6  WRITE_DATA APPEND EXECUTE READ_ATTR SYNCHRONIZE
+
+  C:\ProgramData
+      0x001201BF  READ_DATA WRITE_DATA APPEND READ_EA WRITE_EA EXECUTE
+                  READ_ATTR WRITE_ATTR READ_CONTROL SYNCHRONIZE
+
+  ...\blog\README.md
+      0x001F01FF  READ_DATA WRITE_DATA APPEND READ_EA WRITE_EA EXECUTE
+                  READ_ATTR WRITE_ATTR DELETE READ_CONTROL WRITE_DAC
+                  WRITE_OWNER SYNCHRONIZE</code></pre>
+
+<p>First, the satisfying part: <code>hosts</code> came back <code>0x001200A9</code>. Go scroll up to the SDDL. <code>(A;ID;0x1200a9;;;BU)</code>. The kernel handed me <strong>the exact hex value written in the ACL</strong>, because I'm in BUILTIN\Users and that's my ACE. The theory and the experiment closed the loop perfectly and I may have made a noise out loud.</p>
+
+<p>But now look at <code>C:\Windows\Temp</code>, and look at it carefully:</p>
+
+<pre><code>  0x001000A6  WRITE_DATA APPEND EXECUTE READ_ATTR SYNCHRONIZE
+              ^^^^^^^^^^        no READ_DATA. no READ_CONTROL.</code></pre>
+
+<p>I can <strong>write</strong> files there. I cannot <strong>list</strong> them. I can't even read the DACL. That's a deliberate "drop box" pattern, and it is exactly the shape of directory that Windows privilege escalation research lives on: a place where a low-privileged user can plant a file that a high-privileged process will later touch, in a directory the low-privileged user can't enumerate but the attacker doesn't need to, because they know the filename they're planting.</p>
+
+<p>Now imagine running that prober not over seven paths I picked by hand, but over every directory a privileged service touches, every registry key under <code>HKLM\SYSTEM\CurrentControlSet\Services</code>, every named pipe in <code>\Device\NamedPipe</code>, every object in <code>\BaseNamedObjects</code>. Filter for anything where a Medium-integrity token gets <code>WRITE_DATA</code>, <code>WRITE_DAC</code>, or <code>DELETE</code> on something owned by SYSTEM. That's a weekend project, it's about two hundred lines of code, and it is a genuinely productive way to find real bugs. It works on every object type, because remember: they all share the same header, so they all go through the same check.</p>
+
+<h2>NT ACCESS INTERNALS: why handle, not path?</h2>
+
+<p>In the SOP post I hammered one point: <strong>make security decisions on origins, not URLs</strong>. Chromium has an entire doc calling URL-as-origin an anti-pattern, and a whole class of Chromium bugs is just someone comparing strings instead of comparing <code>url::Origin</code>.</p>
+
+<p>Windows has the exact same bug class, and it's arguably worse. Here it is:</p>
+
+<blockquote>
+<p><strong>Make security decisions on handles, not paths.</strong></p>
+</blockquote>
+
+<p>Look at what we established. A path is:</p>
+
+<ul>
+<li>Rewritten by <code>kernel32</code> before the kernel sees it (trailing dots, spaces, <code>..</code>, slashes).</li>
+<li>Resolved through <strong>symbolic links you can create</strong>, that can be swapped between two calls.</li>
+<li>Interpreted against a <strong>per-session</strong> <code>\??\</code> view, so the same string means different things to different users.</li>
+<li>Reachable by infinitely many spellings, <code>C:\x</code>, <code>\\?\C:\x</code>, <code>\\?\GLOBALROOT\Device\HarddiskVolume3\x</code>, an 8.3 short name, a hardlink, a mounted volume path, a UNC path to <code>\\localhost\C$\x</code>.</li>
+</ul>
+
+<p>A handle is none of those things. A handle is a direct pointer to <em>the object the access check already ran against</em>. That's the whole difference.</p>
+
+<p>So the canonical Windows logic bug looks like this, and once you've seen it you see it everywhere:</p>
+
+<pre><code>// The eternal bug. A privileged service, doing something reasonable.
+
+if (IsPathSafe(userSuppliedPath))          // (1) decision made on a STRING
+{
+    h = CreateFile(userSuppliedPath, ...); // (2) resolved AGAIN, later,
+                                           //     through symlinks the
+                                           //     attacker controls
+    WriteFile(h, ...);                     // (3) with SYSTEM's token
+}</code></pre>
+
+<p>Between (1) and (2), the string gets resolved a second time. Nothing guarantees it lands on the same object. The check was real. The check was also completely irrelevant, because it validated a <em>name</em> and the write happened to an <em>object</em>.</p>
+
+<p>And we already proved the attacker's half of that, way back in the path section. Scroll up to the junction experiment: same path string, different file, <code>elevated = False</code>. That wasn't a party trick, that was step (2) being answered differently than step (1). The whole exploit is those four lines of PowerShell, aimed at a service that trusted a string.</p>
+
+<p>This is TOCTOU, but I want to be precise about <em>why</em> Windows is so rich in it, because "it's a race condition" undersells it. It's because <strong>name resolution is a re-runnable, attacker-influenceable computation</strong>, and the platform gives unprivileged users first-class tools to influence it: object manager symlinks in <code>\??\</code>, NTFS junctions (no admin required), hardlinks, and <code>\RPC Control</code> as a writable directory to plant links in. James Forshaw's <code>symboliclink-testing-tools</code> exists precisely because this is a whole ecosystem, not a one-off trick.</p>
+
+<p>And now the thing I asked you to hold onto at the very start comes back. <strong>The access check runs once, at open time, and the handle carries the frozen result.</strong> Which means the attacker's goal is never "bypass the access check". It's:</p>
+
+<ul>
+<li>Make the check run against a <strong>different object</strong> than the one that gets used (symlink, junction, race).</li>
+<li>Make the check run with a <strong>different token</strong> than yours (impersonation, the entire Potato family).</li>
+<li>Get someone else's <strong>handle</strong>, which already passed a check you'd have failed (handle leaks, inherited handles, duplication from a privileged process).</li>
+</ul>
+
+<p>Three doors. None of them involve defeating the algorithm. The algorithm is fine. It's been fine since 1993. Everything interesting happens at its edges.</p>
+
+<h2>Putting it all together</h2>
+
+<p>Let's zoom all the way out. What happens when you open <code>C:\secret.txt</code>:</p>
+
+<ol>
+<li><code>kernel32</code> <strong>rewrites your string</strong>, collapsing dots and stripping trailing junk, unless you used <code>\\?\</code>. The kernel never sees what you typed.</li>
+<li><code>RtlDosPathNameToNtPathName_U</code> turns it into <code>\??\C:\secret.txt</code>, where <code>\??\</code> is a <strong>per-session</strong> namespace view.</li>
+<li><code>ObpLookupObjectName</code> walks that namespace. <code>C:</code> is a <strong>symbolic link</strong>, so <code>ObpParseSymbolicLink</code> returns <code>STATUS_REPARSE</code> and the whole lookup restarts against <code>\Device\HarddiskVolume3\secret.txt</code>.</li>
+<li>The device's parse procedure <code>IopParseDevice</code> swallows the rest of the path and hands it to the filesystem. <strong>The Object Manager stops at the volume.</strong></li>
+<li>The filesystem calls <code>SeAccessCheck</code>. <strong>MIC</strong> computes a ceiling from the SACL's integrity label (defaulting to NO_WRITE_UP at Medium). Then privileges are subtracted, then the owner's implicit rights, then the DACL is walked <strong>in stored order</strong>, allow-ACEs subtracting from <code>RemainingAccess</code> and deny-ACEs exiting immediately. If <code>RemainingAccess</code> hits zero, you're in.</li>
+<li>A handle is written into your handle table with a <strong>frozen</strong> <code>GrantedAccess</code>, and the security descriptor is never consulted for that handle again.</li>
+</ol>
+
+<p>That's it. That's the whole thing. A design from 1993, built to satisfy a DoD checklist, that separates <em>who you are</em> from <em>what may be done</em> and puts exactly one function in charge of combining them. It's genuinely elegant. It's also thirty-three years of accumulated compatibility layers stacked on top of each other, and every single one of those layers is a place where two pieces of code can disagree about what a name means.</p>
+
+<p>No bug in this one either, same as last time. But that's not the point. The point is that now, when you're reading some privileged Windows service and you see it validate a path as a string and open it later, or build a DACL with the allow-ACE first, or check <code>dacl == NULL</code> the same way it checks <code>AceCount == 0</code>, or trust a handle somebody handed it, a little alarm should go off in your head.</p>
+
+<p>That alarm is the entire deliverable. It's worth more than any single CVE. :D</p>
+
+<p>See you in the next one. Bye!</p>
+
+<hr/>
+
+<h2>Appendix: reproduce it yourself</h2>
+
+<p>Everything in this post is from my own machine, unelevated, on Windows 11. Two things if you want to redo it:</p>
+
+<ul>
+<li><strong>Do not use PowerShell's <code>Get-Item</code> or .NET's <code>File.Open</code> for path experiments.</strong> Both normalize paths before the call and will happily tell you that <code>\\?\C:\Windows\..\Windows</code> works. It doesn't. P/Invoke <code>CreateFileW</code> directly or you're testing the wrong thing. I wasted a good half hour on exactly this.</li>
+<li><code>NtQueryObject</code> with <code>ObjectBasicInformation</code> wants a buffer of <strong>exactly</strong> 56 bytes. Give it more and it returns <code>STATUS_INFO_LENGTH_MISMATCH</code> (<code>0xC0000004</code>), which is a delightfully counterintuitive way to say "your buffer is too big".</li>
+</ul>
+
+<h2>References</h2>
+<ul>
+<li><a href="https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-dtyp/4f1bbcbb-814a-4c70-a11e-2a5b8779a6f9">MS-DTYP 2.5.3.2</a> — the Access Check algorithm pseudocode, straight from Microsoft</li>
+<li><a href="https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-dtyp/ae69a089-473d-4c23-bf3d-7a12a9d11123">MS-DTYP 2.5.3.1.1</a> — the MandatoryIntegrityCheck algorithm pseudocode</li>
+<li><a href="https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/windows-kernel-mode-object-manager">MSDN — Windows Kernel-Mode Object Manager</a> — objects, types, the namespace</li>
+<li><a href="https://learn.microsoft.com/en-us/windows/win32/fileio/reparse-points">MSDN — Reparse Points</a> and <a href="https://learn.microsoft.com/en-us/windows/win32/fileio/hard-links-and-junctions">Hard Links and Junctions</a></li>
+<li><a href="https://learn.microsoft.com/en-us/archive/blogs/jeremykuhne/dos-to-nt-a-paths-journey">Jeremy Kuhne — DOS to NT: A Path's Journey</a></li>
+<li><a href="https://learn.microsoft.com/en-us/archive/blogs/jeremykuhne/path-normalization">Jeremy Kuhne — Path Normalization</a></li>
+<li><a href="https://learn.microsoft.com/en-us/windows/win32/secauthz/access-mask">MSDN — ACCESS_MASK format</a></li>
+<li><a href="https://csandker.io/2018/06/14/AWindowsAuthorizationGuide.html">csandker — A Windows Authorization Guide</a></li>
+<li><a href="https://www.tiraniddo.dev/">James Forshaw — Tyranid's Lair</a>, and <a href="https://github.com/googleprojectzero/symboliclink-testing-tools">symboliclink-testing-tools</a></li>
+<li><a href="https://googleprojectzero.blogspot.com/2015/08/windows-10hh-symbolic-link-mitigations.html">Project Zero — Windows 10 Symbolic Link Mitigations</a></li>
+<li><a href="https://github.com/hfiref0x/WinObjEx64">WinObjEx64</a> — browse the NT object namespace yourself, do this, it's fun</li>
+</ul>
+
+</div>
+<footer>
+<p><a href="../index.html">&lt;- home</a> // davi-1337 © 2026</p>
+</footer>
+</body>
+</html>
